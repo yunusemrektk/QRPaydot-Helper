@@ -119,6 +119,12 @@ Bu tek komut sırasıyla:
 - `latest.yml` (auto-update manifest) üretir
 - GitHub'da Release oluşturur ve dosyaları yükler
 
+**Sürüm Releases’ta görünmüyor, yalnızca Tags’ta mı var?** electron-builder, ortamda `EP_DRAFT` boş veya yanlış ayarlıysa **taslak (draft)** release oluşturabilir; taslaklar ana sürüm listesinde ve `releases/latest` yönlendirmesinde görünmez. `publish:win` artık `EP_DRAFT=false` ile çalışır; yine de `.env` içinde `EP_DRAFT=` veya `EP_DRAFT=true` satırı bırakmayın. Eski taslakları GitHub → **Releases** → **Drafts** altından yayınlayın veya silin.
+
+**Etikette “Verified” yok:** GitHub’daki yeşil **Verified**, genelde **GPG veya SSH ile imzalanmış** commit/etiket anlamına gelir. `electron-builder` API ile oluşturulan sürümler imzasız olabilir; imza için [GitHub dokümantasyonu: commit imzalama](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification) veya CI’de imzalı tag kullanın.
+
+**422 `tag_name` / `already_exists`:** Aynı sürüm için release zaten varken (veya iki artifact aynı anda yeni release oluşturmaya çalışırken) GitHub bu hatayı döndürebilir. Bu repoda `electron-publish` için `patches/electron-publish+26.8.1.patch` uygulanır; kök dizinde `npm install` → `postinstall` (`patch-package`) patch’i yeniden uygular. `electron-builder` / `electron-publish` sürümü değişirse patch’i güncellemek gerekebilir. Yayında aynı tag’e tekrar binary yüklemek için `publish:win` içinde `EP_GH_IGNORE_TIME=true` kullanılır (2 saatten eski release’e yükleme).
+
 ### Alternatif: manuel upload
 
 `GH_TOKEN` olmadan da çalışabilir:

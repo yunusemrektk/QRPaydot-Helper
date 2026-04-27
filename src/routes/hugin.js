@@ -1,7 +1,9 @@
 'use strict';
 
 const { Router } = require('express');
+const { fetch: undiciFetch, Agent } = require('undici');
 const { getPosAssignment } = require('../lib/printerStore');
+const { isPrivateOrLocalHost } = require('../config');
 const os = require('os');
 const dgram = require('dgram');
 
@@ -25,10 +27,32 @@ function dbg(event, payload) {
   }
 }
 
-// Some devices use a self-signed cert on LAN (common on 4443). Allow opting out of TLS verification.
-// This is a LOCAL helper only; do not enable unless needed.
-if (String(process.env.HELPER_HUGIN_INSECURE_TLS || '').trim() === '1') {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+/**
+ * Paketli kurulumda repo/.env yok; geliştirmede merchant-dash/.env içindeki
+ * HELPER_HUGIN_INSECURE_TLS=1 ile TLS gevşetiliyordu. Hugin PC Link (HTTPS 4443)
+ * çoğu kurulumda self-signed kullanır — LAN/Hugin hedeflerinde doğrulamayı
+ * isteğe bağlı gevşet (process genelinde NODE_TLS_REJECT_UNAUTHORIZED kullanmadan).
+ * Tam doğrulama: HELPER_HUGIN_STRICT_TLS=1
+ */
+let huginInsecureDispatcher = null;
+function getHuginInsecureDispatcher() {
+  if (!huginInsecureDispatcher) {
+    huginInsecureDispatcher = new Agent({ connect: { rejectUnauthorized: false } });
+  }
+  return huginInsecureDispatcher;
+}
+
+function shouldRelaxTlsForHugin(hostname, port) {
+  if (String(process.env.HELPER_HUGIN_STRICT_TLS || '').trim() === '1') return false;
+  const legacyEnv = String(process.env.HELPER_HUGIN_INSECURE_TLS || '').trim() === '1';
+  const h = String(hostname || '').trim();
+  const p = Number(port);
+  if (!h) return legacyEnv;
+  if (legacyEnv) return true;
+  if (isPrivateOrLocalHost(h)) return true;
+  if (p === 4443) return true;
+  if (h.endsWith('.local')) return true;
+  return false;
 }
 
 function hardwareIdOverride() {
@@ -141,11 +165,15 @@ async function huginFetch(posDeviceId, path, init, headersExtra) {
     body: init.body ?? undefined,
   });
 
-  const res = await fetch(url, {
+  const urlObj = new URL(url);
+  const relaxTls = urlObj.protocol === 'https:' && shouldRelaxTlsForHugin(urlObj.hostname, ep.port);
+  const fetchOpts = {
     ...init,
     headers,
     body: init.body != null ? JSON.stringify(init.body) : undefined,
-  });
+    ...(relaxTls ? { dispatcher: getHuginInsecureDispatcher() } : {}),
+  };
+  const res = await undiciFetch(url, fetchOpts);
 
   const json = await res.json().catch(() => null);
   dbg('response', { posDeviceId, from: url, httpStatus: res.status, json });

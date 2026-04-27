@@ -147,4 +147,5 @@ module.exports = {
   shouldOpenControlPanelInBrowser,
   getMerchantDashUrl,
   shouldOpenMerchantDash,
+  isPrivateOrLocalHost,
 };

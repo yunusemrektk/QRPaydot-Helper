@@ -1,8 +1,12 @@
 {
   "name": "qrpaydot-helper",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "QRPaydot Helper — local HTTP → RAW TCP (JetDirect) bridge for thermal printers. Merchant-Dash EXTERNAL mode.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yunusemrektk/QRPaydot-Helper.git"
+  },
   "main": "electron-main.cjs",
   "scripts": {
     "start": "node src/index.js",
@@ -14,7 +18,8 @@
     "build:win": "npm run panel:build && electron-builder --win --dir",
     "build:installer": "npm run panel:build && electron-builder --win nsis",
     "build:release:win": "npm run build:installer",
-    "publish:win": "npm run panel:build && dotenv -- electron-builder --win nsis --publish always"
+    "postinstall": "patch-package",
+    "publish:win": "npm run panel:build && cross-env EP_DRAFT=false EP_PRE_RELEASE=false EP_GH_IGNORE_TIME=true dotenv -- electron-builder --win nsis --publish always"
   },
   "build": {
     "appId": "com.qrpaydot.helper",
@@ -68,12 +73,15 @@
     "electron-updater": "^6.8.3",
     "express": "^4.21.2",
     "iconv-lite": "^0.7.2",
+    "undici": "^6.25.0",
     "ws": "^8.20.0"
   },
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "dotenv-cli": "^11.0.0",
     "electron": "^33.2.0",
     "electron-builder": "^26.8.1",
+    "patch-package": "^8.0.1",
     "png-to-ico": "^3.0.1",
     "sharp": "^0.34.5"
   }
