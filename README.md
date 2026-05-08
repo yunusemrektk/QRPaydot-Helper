@@ -253,6 +253,27 @@ Güncelleme sonrası ilk açılışta `{ "justUpdated": true, "from": "1.0.3", "
 
 Yanıt: `{ "ok": true }` veya `500` + `{ "error": "..." }`.
 
+### POS köprüsü (Hugin; ileride diğer üreticiler)
+
+Merchant panel doğrudan Hugin cihazına gitmez; tarayıcı **`http://127.0.0.1:<PRINT_BRIDGE_PORT>`** (varsayılan **17888**) üzerinden Helper’a konuşur, Helper da LAN’daki **Hugin PC Link** (HTTPS) ile konuşur.
+
+| Prefix | Açıklama |
+|--------|-----------|
+| **`/v1/pos/...`** | Çoklu üretici hazırlığı. Query’de **`vendor`** kullanılır; şu an yalnızca **`hugin`**. Verilmezse varsayılan **`hugin`**. Tanımsız vendor → **501** ve `{ "status": "ERROR", "error": { ... } }`. |
+| **`/v1/hugin/...`** | Geriye dönük uyumluluk; aynı işleyiciye bağlıdır, `vendor` gerekmez. |
+
+Aşağıdaki **göreli yollar** her iki mount’ta da aynıdır (`/v1/pos` veya `/v1/hugin` + göreli path). Örnek: canlı durum  
+`GET /v1/pos/status?vendor=hugin&posDeviceId=...&softwareId=...&serialNo=...`.
+
+| HTTP | Göreli yol |
+|------|------------|
+| GET | `/status`, `/settings`, `/reports/X`, `/pos/batch` |
+| PATCH | `/settings` |
+| POST | `/ensure-sale-document`, `/documents`, `/documents/:documentId/payments/EFT_POS`, `/documents/:documentId/resume`, `/documents/:documentId/cancel`, `/reports/Z`, `/pos/batch/close` |
+| PUT | `/documents/:documentId` |
+
+Yanıt gövdesi tipik olarak Hugin PC Link ile uyumlu **`{ "status": "SUCCESS" \| "ERROR", "data"?, "error"? }`** biçimindedir. TLS gevşetme ve diğer **`HELPER_HUGIN_*`** değişkenleri bu proxy için geçerlidir (bkz. `src/routes/hugin.js`).
+
 ## Güvenlik
 
 - Varsayılan **loopback** bağlayıcısı: yalnızca aynı makinedeki uygulamalar erişir.  

@@ -9,6 +9,7 @@ const scanRouter = require('./routes/scan');
 const printersRouter = require('./routes/printers');
 const posDevicesRouter = require('./routes/pos-devices');
 const huginRouter = require('./routes/hugin');
+const posVendorMiddleware = require('./middleware/posVendor');
 const credentialsRouter = require('./routes/credentials');
 const updateRouter = require('./routes/update');
 const panelRouter = require('./routes/panel');
@@ -36,7 +37,8 @@ function createApp() {
   app.use(scanRouter);
   app.use(printersRouter);
   app.use(posDevicesRouter);
-  app.use(huginRouter);
+  app.use('/v1/hugin', huginRouter);
+  app.use('/v1/pos', posVendorMiddleware, huginRouter);
   app.use(credentialsRouter);
   app.use(updateRouter);
   app.use(panelRouter);

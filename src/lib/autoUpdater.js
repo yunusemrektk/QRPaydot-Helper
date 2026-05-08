@@ -52,7 +52,7 @@ function init() {
     return;
   }
   if (!isPackaged) {
-    console.log('[auto-updater] dev mode — skipping auto-update init');
+    console.log('[auto-updater] dev mode - skipping auto-update init');
     return;
   }
 
@@ -68,7 +68,7 @@ function init() {
   updater.on('checking-for-update', () => {
     state.status = 'checking';
     state.error = null;
-    console.log('[auto-updater] checking for updates…');
+    console.log('[auto-updater] checking for updates...');
   });
 
   updater.on('update-available', (info) => {
@@ -92,7 +92,7 @@ function init() {
     state.status = 'downloaded';
     state.availableVersion = info?.version ?? state.availableVersion;
     state.progress = 100;
-    console.log('[auto-updater] downloaded:', info?.version, '— silent restart');
+    console.log('[auto-updater] downloaded:', info?.version, '- silent restart');
     try {
       fs.writeFileSync(JUST_UPDATED_PATH, JSON.stringify({
         from: state.currentVersion,
@@ -113,7 +113,7 @@ function init() {
     console.error('[auto-updater]', err);
   });
 
-  console.log('[auto-updater] initialised — checking on launch');
+  console.log('[auto-updater] initialised - checking on launch');
   updater.checkForUpdates().catch((e) => {
     console.error('[auto-updater] initial check failed:', e?.message);
   });

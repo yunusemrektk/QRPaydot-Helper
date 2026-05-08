@@ -70,6 +70,17 @@ const server = app.listen(PORT, BIND, () => {
   const panelOk = fs.existsSync(panelIdx);
   appendServiceLog(`listening ${base} publicDir=${publicDir} panelIndex=${panelOk}`);
   ensurePrintDefaults();
+
+  if (BIND === '0.0.0.0' && String(process.env.PRINT_BRIDGE_SILENCE_PUBLIC_BIND_WARNING || '').trim() !== '1') {
+    const msg =
+      'listening on all interfaces — firewall / trusted network strongly recommended Helper is not a public HTTPS API';
+    appendServiceLog(`WARNING: ${msg}`);
+    console.warn(`[${SERVICE_SLUG}] SECURITY ${msg}`);
+    console.warn(
+      `[${SERVICE_SLUG}] Set PRINT_BRIDGE_SILENCE_PUBLIC_BIND_WARNING=1 to suppress; use LAN-only by default (PRINT_BRIDGE_BIND defaults to 127.0.0.1).`,
+    );
+  }
+
   console.log(`[${SERVICE_SLUG}] v${SERVICE_VERSION}  ${base}`);
   console.log(`[${SERVICE_SLUG}] panel   ${base}/`);
   console.log(`[${SERVICE_SLUG}] public  ${publicDir} (Vite panel: ${panelOk ? 'ok' : 'run npm run panel:build'})`);
@@ -80,7 +91,20 @@ const server = app.listen(PORT, BIND, () => {
   const saved = getBackendConnection();
   if (saved) {
     appendServiceLog('[boot] restoring backend WebSocket from disk');
+    const apiSh = String(saved.apiBaseUrl || '')
+      .trim()
+      .replace(/\/+$/, '');
+    console.log(
+      `[${SERVICE_SLUG}] backend WS  credentials on disk - connecting to ${apiSh || '(no url)'}`,
+    );
     startBackendWs(saved);
+  } else {
+    appendServiceLog(
+      '[boot] Backend kimliği yok — sunucuya WebSocket bağlanmadı (uzaktan fiş/POS işi gelmez). Aynı PC’den işletme paneli → Ayarlar > Yazdırma ile oturumu Helper’a yazın.',
+    );
+    console.warn(
+      `[${SERVICE_SLUG}] backend WS  disabled - no saved credentials (open merchant dashboard on this PC: Settings > Printing)`,
+    );
   }
 
   setTimeout(() => {

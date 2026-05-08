@@ -202,7 +202,7 @@ function parseStartedDocumentId(payload) {
   return parseActiveDocumentId(payload);
 }
 
-router.get('/v1/hugin/status', async (req, res) => {
+router.get('/status', async (req, res) => {
   try {
     const posDeviceId = String(req.query.posDeviceId || '').trim();
     const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
@@ -226,7 +226,7 @@ router.get('/v1/hugin/status', async (req, res) => {
   }
 });
 
-router.get('/v1/hugin/settings', async (req, res) => {
+router.get('/settings', async (req, res) => {
   try {
     const posDeviceId = String(req.query.posDeviceId || '').trim();
     const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
@@ -250,7 +250,7 @@ router.get('/v1/hugin/settings', async (req, res) => {
   }
 });
 
-router.patch('/v1/hugin/settings', async (req, res) => {
+router.patch('/settings', async (req, res) => {
   try {
     const posDeviceId = String(req.query.posDeviceId || '').trim();
     const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
@@ -274,7 +274,7 @@ router.patch('/v1/hugin/settings', async (req, res) => {
   }
 });
 
-router.post('/v1/hugin/ensure-sale-document', async (req, res) => {
+router.post('/ensure-sale-document', async (req, res) => {
   try {
     const posDeviceId = String(req.query.posDeviceId || '').trim();
     const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
@@ -335,7 +335,7 @@ router.post('/v1/hugin/ensure-sale-document', async (req, res) => {
   }
 });
 
-router.post('/v1/hugin/documents', async (req, res) => {
+router.post('/documents', async (req, res) => {
   try {
     const posDeviceId = String(req.query.posDeviceId || '').trim();
     const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
@@ -361,7 +361,7 @@ router.post('/v1/hugin/documents', async (req, res) => {
   }
 });
 
-router.post('/v1/hugin/documents/:documentId/payments/EFT_POS', async (req, res) => {
+router.post('/documents/:documentId/payments/EFT_POS', async (req, res) => {
   try {
     const posDeviceId = String(req.query.posDeviceId || '').trim();
     const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
@@ -387,7 +387,7 @@ router.post('/v1/hugin/documents/:documentId/payments/EFT_POS', async (req, res)
   }
 });
 
-router.put('/v1/hugin/documents/:documentId', async (req, res) => {
+router.put('/documents/:documentId', async (req, res) => {
   try {
     const posDeviceId = String(req.query.posDeviceId || '').trim();
     const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
@@ -413,7 +413,7 @@ router.put('/v1/hugin/documents/:documentId', async (req, res) => {
   }
 });
 
-router.post('/v1/hugin/documents/:documentId/resume', async (req, res) => {
+router.post('/documents/:documentId/resume', async (req, res) => {
   try {
     const posDeviceId = String(req.query.posDeviceId || '').trim();
     const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
@@ -439,7 +439,7 @@ router.post('/v1/hugin/documents/:documentId/resume', async (req, res) => {
   }
 });
 
-router.get('/v1/hugin/reports/X', async (req, res) => {
+router.get('/reports/X', async (req, res) => {
   try {
     const posDeviceId = String(req.query.posDeviceId || '').trim();
     const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
@@ -463,7 +463,7 @@ router.get('/v1/hugin/reports/X', async (req, res) => {
   }
 });
 
-router.post('/v1/hugin/reports/Z', async (req, res) => {
+router.post('/reports/Z', async (req, res) => {
   try {
     const posDeviceId = String(req.query.posDeviceId || '').trim();
     const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
@@ -493,7 +493,7 @@ router.post('/v1/hugin/reports/Z', async (req, res) => {
   }
 });
 
-router.get('/v1/hugin/pos/batch', async (req, res) => {
+router.get('/pos/batch', async (req, res) => {
   try {
     const posDeviceId = String(req.query.posDeviceId || '').trim();
     const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
@@ -517,7 +517,7 @@ router.get('/v1/hugin/pos/batch', async (req, res) => {
   }
 });
 
-router.post('/v1/hugin/pos/batch/close', async (req, res) => {
+router.post('/pos/batch/close', async (req, res) => {
   try {
     const posDeviceId = String(req.query.posDeviceId || '').trim();
     const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
@@ -541,7 +541,7 @@ router.post('/v1/hugin/pos/batch/close', async (req, res) => {
   }
 });
 
-router.post('/v1/hugin/documents/:documentId/cancel', async (req, res) => {
+router.post('/documents/:documentId/cancel', async (req, res) => {
   try {
     const posDeviceId = String(req.query.posDeviceId || '').trim();
     const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());

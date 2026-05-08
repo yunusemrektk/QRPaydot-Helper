@@ -58,6 +58,8 @@ function sendAuth() {
       type: 'AUTH',
       token: activeConfig.token,
       merchantId: String(activeConfig.merchantId).trim(),
+      /** Sunucuda panel oturumlarından ayrım için (MERCHANT_DASH dışında → köprü). */
+      clientKind: 'PRINT_BRIDGE',
     }),
   );
 }
@@ -108,12 +110,26 @@ function onMessage(raw) {
     reconnectDelayMs = BASE_RECONNECT_MS;
     lastError = null;
     appendServiceLog('[backend-ws] AUTH_SUCCESS');
+    try {
+      console.log(
+        `[qrpaydot-helper] backend WS AUTH_SUCCESS merchantId=${activeConfig ? String(activeConfig.merchantId).trim() : ''}`,
+      );
+    } catch {
+      console.log('[qrpaydot-helper] backend WS AUTH_SUCCESS');
+    }
     return;
   }
   if (type === 'AUTH_ERROR') {
     authenticated = false;
     lastError = msg.error || 'AUTH_ERROR';
     appendServiceLog(`[backend-ws] AUTH_ERROR ${lastError}`);
+    if (String(lastError).includes('expired')) {
+      console.warn(
+        '[qrpaydot-helper] backend WS AUTH_ERROR: saved JWT expired — open merchant dashboard on this PC and refresh (F5), or POST /v1/credentials again',
+      );
+    } else {
+      console.warn(`[qrpaydot-helper] backend WS AUTH_ERROR: ${lastError}`);
+    }
     return;
   }
   if (type === 'PRINT_JOB' && msg.data) {
@@ -122,6 +138,48 @@ function onMessage(raw) {
       appendServiceLog(`[backend-ws] PRINT_JOB failed: ${lastError}`);
       console.error('[qrpaydot-helper] PRINT_JOB error:', err.message || err);
     });
+    return;
+  }
+  if (type === 'POS_PAYMENT_JOB' && msg.data) {
+    if (!authenticated) {
+      appendServiceLog('[backend-ws] POS_PAYMENT_JOB ignored (not authenticated)');
+      return;
+    }
+    appendServiceLog(
+      `[backend-ws] POS_PAYMENT_JOB recv jobId=${msg.data.jobId != null ? String(msg.data.jobId) : ''}`,
+    );
+    console.log(
+      `[qrpaydot-helper] backend WS POS_PAYMENT_JOB recv jobId=${msg.data.jobId != null ? String(msg.data.jobId) : ''}`,
+    );
+    const { runPosPaymentJobFromWs } = require('./posPaymentJobRunner');
+    void runPosPaymentJobFromWs(msg.data).catch((err) => {
+      lastError = err.message || String(err);
+      appendServiceLog(`[backend-ws] POS_PAYMENT_JOB runner error: ${lastError}`);
+      console.error('[qrpaydot-helper] POS_PAYMENT_JOB:', err.message || err);
+    });
+    return;
+  }
+  if (type === 'POS_HUGIN_STATUS_PROBE' && msg.data) {
+    if (!authenticated) {
+      appendServiceLog('[backend-ws] POS_HUGIN_STATUS_PROBE ignored (not authenticated)');
+      return;
+    }
+    const { handlePosHuginStatusProbe } = require('./huginStatusProbeWs');
+    void handlePosHuginStatusProbe(msg.data).catch((err) => {
+      appendServiceLog(`[backend-ws] POS_HUGIN_STATUS_PROBE ${err.message || err}`);
+    });
+    return;
+  }
+  if (type === 'POS_HUGIN_DOC_ACTION' && msg.data) {
+    if (!authenticated) {
+      appendServiceLog('[backend-ws] POS_HUGIN_DOC_ACTION ignored (not authenticated)');
+      return;
+    }
+    const { handlePosHuginDocAction } = require('./huginDocActionWs');
+    void handlePosHuginDocAction(msg.data).catch((err) => {
+      appendServiceLog(`[backend-ws] POS_HUGIN_DOC_ACTION ${err.message || err}`);
+    });
+    return;
   }
 }
 
@@ -149,6 +207,7 @@ function connectNow() {
 
   ws.on('open', () => {
     appendServiceLog(`[backend-ws] connected ${url}`);
+    console.log(`[qrpaydot-helper] backend WS open -> ${url}`);
     sendAuth();
   });
 
