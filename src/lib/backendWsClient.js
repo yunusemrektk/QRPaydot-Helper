@@ -162,8 +162,14 @@ function onMessage(raw) {
   if (type === 'POS_HUGIN_STATUS_PROBE' && msg.data) {
     if (!authenticated) {
       appendServiceLog('[backend-ws] POS_HUGIN_STATUS_PROBE ignored (not authenticated)');
+      console.warn(
+        '[qrpaydot-helper] POS_HUGIN_STATUS_PROBE ignored — not authenticated; open merchant dashboard on this PC and save credentials to Helper',
+      );
       return;
     }
+    const pid = msg.data.probeId != null ? String(msg.data.probeId).trim() : '';
+    appendServiceLog(`[backend-ws] POS_HUGIN_STATUS_PROBE recv probeId=${pid}`);
+    console.log(`[qrpaydot-helper] POS_HUGIN_STATUS_PROBE recv probeId=${pid}`);
     const { handlePosHuginStatusProbe } = require('./huginStatusProbeWs');
     void handlePosHuginStatusProbe(msg.data).catch((err) => {
       appendServiceLog(`[backend-ws] POS_HUGIN_STATUS_PROBE ${err.message || err}`);
