@@ -3,6 +3,7 @@
 const { fetch: undiciFetch } = require('undici');
 const { PORT } = require('../config');
 const { getPosAssignment, getBackendConnection } = require('./printerStore');
+const { backendBearerForApi, hasBackendCallbackAuth } = require('./backendCallbackAuth');
 const { appendServiceLog } = require('./logger');
 
 let lastPosJobId = '';
@@ -127,7 +128,7 @@ async function runPosPaymentJobFromWs(data) {
   lastPosJobAt = now;
 
   const cfg = getBackendConnection();
-  if (!cfg || !cfg.token || !cfg.merchantId || !cfg.apiBaseUrl) {
+  if (!cfg || !cfg.merchantId || !cfg.apiBaseUrl || !hasBackendCallbackAuth(cfg)) {
     appendServiceLog('[backend-ws] POS_PAYMENT_JOB: no credentials');
     return;
   }
@@ -399,7 +400,7 @@ async function postJobComplete(cfg, merchantId, jobId, payload) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${cfg.token}`,
+        Authorization: `Bearer ${backendBearerForApi(cfg)}`,
       },
       body: JSON.stringify(payload),
     });

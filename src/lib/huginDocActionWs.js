@@ -4,6 +4,7 @@ const { fetch: undiciFetch } = require('undici');
 const { PORT } = require('../config');
 const { appendServiceLog } = require('./logger');
 const { getBackendConnection } = require('./printerStore');
+const { backendBearerForApi, hasBackendCallbackAuth } = require('./backendCallbackAuth');
 
 function padSoftwareId10(raw) {
   const s = String(raw || '').trim();
@@ -30,7 +31,7 @@ async function handlePosHuginDocAction(wsMsgData) {
   }
 
   const cfg = getBackendConnection();
-  if (!cfg || !cfg.token || !cfg.apiBaseUrl) {
+  if (!cfg || !hasBackendCallbackAuth(cfg)) {
     appendServiceLog('[backend-ws] POS_HUGIN_DOC_ACTION: no credentials');
     return;
   }
@@ -87,7 +88,7 @@ async function handlePosHuginDocAction(wsMsgData) {
     await undiciFetch(completeUrl, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${cfg.token}`,
+        Authorization: `Bearer ${backendBearerForApi(cfg)}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ ok, error: ok ? '' : errMsg }),
