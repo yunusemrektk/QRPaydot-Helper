@@ -8,14 +8,25 @@ const {
   publicDir, isPkgExe,
   shouldOpenControlPanelInBrowser,
   getMerchantDashUrl, shouldOpenMerchantDash,
+  getBackendWsApiBaseOverride,
 } = require('./config');
-const { appendServiceLogEarly, appendServiceLog, showPackagedWindowsError } = require('./lib/logger');
+const {
+  appendServiceLogEarly,
+  appendServiceLog,
+  showPackagedWindowsError,
+  pruneServiceLogsOlderThan,
+} = require('./lib/logger');
 const { createApp } = require('./app');
 const { runScan } = require('./routes/scan');
 const { getBackendConnection, ensurePrintDefaults } = require('./lib/printerStore');
 const { startBackendWs } = require('./lib/backendWsClient');
 
 appendServiceLogEarly(`boot isPkgExe=${isPkgExe} argv=${JSON.stringify(process.argv)}`);
+try {
+  pruneServiceLogsOlderThan();
+} catch {
+  /* ignore */
+}
 
 /** Open a URL in the default system browser (Windows). */
 function openUrlInBrowser(url) {
@@ -91,12 +102,22 @@ const server = app.listen(PORT, BIND, () => {
   const saved = getBackendConnection();
   if (saved) {
     appendServiceLog('[boot] restoring backend WebSocket from disk');
-    const apiSh = String(saved.apiBaseUrl || '')
+    const override = getBackendWsApiBaseOverride();
+    const connectUrl = String(saved.apiBaseUrl || '')
       .trim()
       .replace(/\/+$/, '');
-    console.log(
-      `[${SERVICE_SLUG}] backend WS  credentials on disk - connecting to ${apiSh || '(no url)'}`,
-    );
+    if (override) {
+      appendServiceLog(
+        `[boot] API base override (PRINT_BRIDGE_API_BASE_URL | VITE_PRINT_BRIDGE_API_BASE_URL | HELPER_API_BASE_URL)=${override} (overrides printers.json; client must use same API host)`,
+      );
+      console.warn(
+        `[${SERVICE_SLUG}] backend WS env API base: ${connectUrl} | must match phone/panel API (re-save JWT or bridge key from THIS host)`,
+      );
+    } else {
+      console.log(
+        `[${SERVICE_SLUG}] backend WS  credentials on disk - connecting to ${connectUrl || '(no url)'}`,
+      );
+    }
     startBackendWs(saved);
   } else {
     appendServiceLog(

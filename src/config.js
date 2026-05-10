@@ -137,6 +137,40 @@ function shouldOpenMerchantDash() {
   return true;
 }
 
+/**
+ * Ortam / .env: diskteki `apiBaseUrl`’i geçersiz kılmak için (geliştirme LAN API vb.):
+ * `PRINT_BRIDGE_API_BASE_URL`, `VITE_PRINT_BRIDGE_API_BASE_URL`, `HELPER_API_BASE_URL`.
+ *
+ * Kurulu Setup (.exe): `npm run publish:win` sırasında gömülen `PRINT_BRIDGE_PROD_API_BASE_URL` (vey varsayılan prod)
+ * → `src/generated/embedBackendApi.cjs`; yalnızca paketli uygulamada kullanılır.
+ */
+function getEmbeddedBackendApiBase() {
+  if (!isPackagedForDistribution()) return '';
+  try {
+    const { EMBEDDED_BACKEND_API_BASE } = require('./generated/embedBackendApi.cjs');
+    const s = trimEnv(EMBEDDED_BACKEND_API_BASE);
+    if (!s) return '';
+    return String(s).replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function getBackendWsApiBaseOverride() {
+  const u =
+    trimEnv(process.env.PRINT_BRIDGE_API_BASE_URL) ||
+    trimEnv(process.env.VITE_PRINT_BRIDGE_API_BASE_URL) ||
+    trimEnv(process.env.HELPER_API_BASE_URL);
+  if (u) {
+    try {
+      return String(u).trim().replace(/\/+$/, '');
+    } catch {
+      return '';
+    }
+  }
+  return getEmbeddedBackendApiBase();
+}
+
 module.exports = {
   PORT,
   BIND,
@@ -148,4 +182,5 @@ module.exports = {
   getMerchantDashUrl,
   shouldOpenMerchantDash,
   isPrivateOrLocalHost,
+  getBackendWsApiBaseOverride,
 };

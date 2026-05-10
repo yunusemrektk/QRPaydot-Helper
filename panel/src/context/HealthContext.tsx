@@ -8,12 +8,35 @@ import {
   type ReactNode,
 } from "react";
 
+export type HealthPosAssignment = {
+  posDeviceId: string;
+  host: string;
+  port: number;
+  scheme: string;
+};
+
 export type HealthPayload = {
   ok?: boolean;
   service?: string;
   version?: string;
   bind?: string;
   merchantDash?: string;
+  backendWs?: boolean;
+  backendWsDetail?: {
+    socketOpen?: boolean;
+    authenticated?: boolean;
+    lastError?: string | null;
+  };
+  backend?: {
+    configured?: boolean;
+    merchantId?: string | null;
+    apiBaseUrl?: string | null;
+    authKind?: "bridgeKey" | "jwt" | null;
+  };
+  pos?: {
+    assignmentCount?: number;
+    assignments?: HealthPosAssignment[];
+  };
 };
 
 type HealthContextValue = {

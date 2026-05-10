@@ -1,12 +1,13 @@
-import { Check, Clock, ExternalLink, Globe, Printer, X } from "lucide-react";
+import { Check, Clock, CreditCard, ExternalLink, Globe, Printer, Radio, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useHealth } from "../context/HealthContext";
 import { usePrinters } from "../context/PrintersContext";
+import { getPanelSessionStartMs } from "../lib/panelSessionStart";
 
 type EventRow = { t: string; m: string };
 
-/** Sayfa açılışından beri geçen süre — saniye yok; dk → sa → gün. */
+/** Helper paneli açıldığından beri geçen süre — saniye yok; dk → sa → gün. */
 function elapsedStr(startTs: number) {
   const s = Math.floor((Date.now() - startTs) / 1000);
   const totalMin = Math.floor(s / 60);
@@ -46,11 +47,10 @@ function ChecklistIcon({ state, icon: Icon }: { state: CkState; icon: LucideIcon
 }
 
 export default function StatusPage() {
-  const startTs = useRef(Date.now());
   const { reachable, data } = useHealth();
   const { printers, loaded: printersLoaded } = usePrinters();
   const [events, setEvents] = useState<EventRow[]>([]);
-  const [uptimeLabel, setUptimeLabel] = useState("—");
+  const [uptimeLabel, setUptimeLabel] = useState(() => elapsedStr(getPanelSessionStartMs()));
   const prevReachable = useRef<boolean | null>(null);
 
   const addEvent = useCallback((text: string) => {
@@ -77,19 +77,53 @@ export default function StatusPage() {
   }, [reachable, addEvent]);
 
   useEffect(() => {
-    if (!reachable) {
-      setUptimeLabel("—");
-      return;
-    }
-    setUptimeLabel(elapsedStr(startTs.current));
-    const id = setInterval(() => {
-      setUptimeLabel(elapsedStr(startTs.current));
-    }, 60_000);
+    const tick = () => setUptimeLabel(elapsedStr(getPanelSessionStartMs()));
+    tick();
+    const id = setInterval(tick, 60_000);
     return () => clearInterval(id);
-  }, [reachable]);
+  }, []);
 
   const merchantDash = data?.merchantDash ?? null;
   const version = data?.version ?? "—";
+
+  const backendConfigured = Boolean(data?.backend?.configured);
+  const wsDetail = data?.backendWsDetail;
+  const posCount = data?.pos?.assignmentCount ?? 0;
+
+  let wsCk: CkState = "dim";
+  let wsBadge = "Bekleniyor";
+  let wsSub = "İşletme kimliği henüz eşleşmedi";
+  if (backendConfigured) {
+    const open = Boolean(wsDetail?.socketOpen);
+    const authed = Boolean(wsDetail?.authenticated);
+    const err = wsDetail?.lastError?.trim();
+    if (open && authed) {
+      wsCk = "ok";
+      wsBadge = "Bağlı";
+      wsSub = "QRPaydot sunucusuna WebSocket ile bağlı";
+    } else if (!open) {
+      wsCk = "fail";
+      wsBadge = "Kapalı";
+      wsSub = err ? `Bağlantı yok — ${err}` : "WebSocket açılamadı veya sunucuya ulaşılamıyor";
+    } else {
+      wsCk = "fail";
+      wsBadge = "Kimlik";
+      wsSub = err ? `Oturum yok — ${err}` : "Kimlik doğrulanamadı";
+    }
+  }
+
+  let posCk: CkState = "dim";
+  let posBadge = "Bekleniyor";
+  let posSub = "Panelden POS → bu PC için LAN hedefi atanabilir";
+  if (posCount > 0) {
+    posCk = "ok";
+    posBadge = `${posCount} terminal`;
+    posSub = "Hugin PC Link için yerel yönlendirme kayıtlı";
+  } else if (backendConfigured) {
+    posCk = "dim";
+    posBadge = "Atama yok";
+    posSub = "Bu makinede POS cihazı IP/port eşlemesi yok";
+  }
 
   const serviceTone =
     reachable === null ? "pending" : reachable ? "ok" : "bad";
@@ -256,7 +290,67 @@ export default function StatusPage() {
                 {dashBadge}
               </span>
             </li>
+            <li>
+              <ChecklistIcon
+                state={wsCk}
+                icon={Radio}
+              />
+              <div className="ck-label">
+                <strong>Sunucu (POS / yazdırma)</strong>
+                <span>{wsSub}</span>
+              </div>
+              <span
+                className={`ck-status ${
+                  wsCk === "ok"
+                    ? "ck-status-ok"
+                    : wsCk === "fail"
+                      ? "ck-status-fail"
+                      : "ck-status-soon"
+                }`}
+              >
+                {wsBadge}
+              </span>
+            </li>
+            <li>
+              <ChecklistIcon state={posCk} icon={CreditCard} />
+              <div className="ck-label">
+                <strong>POS LAN hedefleri</strong>
+                <span>{posSub}</span>
+              </div>
+              <span
+                className={`ck-status ${
+                  posCk === "ok"
+                    ? "ck-status-ok"
+                    : posCk === "fail"
+                      ? "ck-status-fail"
+                      : "ck-status-soon"
+                }`}
+              >
+                {posBadge}
+              </span>
+            </li>
           </ul>
+          {data?.pos?.assignments && data.pos.assignments.length > 0 ? (
+            <div
+              className="pos-health-detail"
+              style={{ marginTop: "1rem", fontSize: "0.75rem", color: "var(--text-dim)" }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: "0.35rem", color: "var(--text)" }}>
+                POS yönlendirme (bu PC)
+              </div>
+              <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
+                {data.pos.assignments.map((a) => (
+                  <li key={a.posDeviceId} style={{ wordBreak: "break-all" }}>
+                    <code className="c">{a.posDeviceId}</code>
+                    <span>
+                      {" → "}
+                      {a.scheme}://{a.host}:{a.port}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
 
         <div className="panel">

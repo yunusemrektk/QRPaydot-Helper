@@ -12,6 +12,7 @@ const huginRouter = require('./routes/hugin');
 const posVendorMiddleware = require('./middleware/posVendor');
 const credentialsRouter = require('./routes/credentials');
 const updateRouter = require('./routes/update');
+const serviceLogsRouter = require('./routes/serviceLogs');
 const panelRouter = require('./routes/panel');
 const notFoundHandler = require('./middleware/notFound');
 
@@ -41,6 +42,7 @@ function createApp() {
   app.use('/v1/pos', posVendorMiddleware, huginRouter);
   app.use(credentialsRouter);
   app.use(updateRouter);
+  app.use(serviceLogsRouter);
   app.use(panelRouter);
   app.use(notFoundHandler);
 

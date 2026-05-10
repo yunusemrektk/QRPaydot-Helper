@@ -53,15 +53,18 @@ function scheduleReconnect() {
 
 function sendAuth() {
   if (!ws || ws.readyState !== WebSocket.OPEN || !activeConfig) return;
-  ws.send(
-    JSON.stringify({
-      type: 'AUTH',
-      token: activeConfig.token,
-      merchantId: String(activeConfig.merchantId).trim(),
-      /** Sunucuda panel oturumlarından ayrım için (MERCHANT_DASH dışında → köprü). */
-      clientKind: 'PRINT_BRIDGE',
-    }),
-  );
+  const merchantId = String(activeConfig.merchantId).trim();
+  const payload = {
+    type: 'AUTH',
+    merchantId,
+    clientKind: 'PRINT_BRIDGE',
+  };
+  if (activeConfig.bridgeKey && String(activeConfig.bridgeKey).trim()) {
+    payload.bridgeKey = String(activeConfig.bridgeKey).trim();
+  } else {
+    payload.token = activeConfig.token;
+  }
+  ws.send(JSON.stringify(payload));
 }
 
 async function handlePrintJobPayload(data) {
@@ -123,9 +126,17 @@ function onMessage(raw) {
     authenticated = false;
     lastError = msg.error || 'AUTH_ERROR';
     appendServiceLog(`[backend-ws] AUTH_ERROR ${lastError}`);
-    if (String(lastError).includes('expired')) {
+    if (String(lastError).toLowerCase().includes('expired')) {
       console.warn(
-        '[qrpaydot-helper] backend WS AUTH_ERROR: saved JWT expired — open merchant dashboard on this PC and refresh (F5), or POST /v1/credentials again',
+        '[qrpaydot-helper] backend WS AUTH_ERROR: JWT expired — use a Helper API key (Settings → Printing) or open dashboard and POST /v1/credentials again',
+      );
+    } else if (String(lastError).toLowerCase().includes('bridge')) {
+      console.warn(
+        '[qrpaydot-helper] backend WS AUTH_ERROR: invalid bridge key — revoke and create a new key in merchant dashboard, then save to Helper',
+      );
+    } else if (String(lastError).toLowerCase().includes('invalid token')) {
+      console.warn(
+        '[qrpaydot-helper] backend WS AUTH_ERROR: Invalid token. JWT is valid only on the API that issued it (same JWT_SECRET). If PRINT_BRIDGE / VITE API URL points at local db-server, log in to merchant dashboard on THAT host and save credentials to Helper again, or create a Helper API key on that server and POST it.',
       );
     } else {
       console.warn(`[qrpaydot-helper] backend WS AUTH_ERROR: ${lastError}`);
@@ -252,7 +263,10 @@ function stopBackendWs() {
  */
 function startBackendWs(config) {
   stopBackendWs();
-  if (!config || !config.token || !config.merchantId || !config.apiBaseUrl) return;
+  if (!config || !config.merchantId || !config.apiBaseUrl) return;
+  const hasJwt = config.token && String(config.token).trim();
+  const hasBridge = config.bridgeKey && String(config.bridgeKey).trim();
+  if (!hasJwt && !hasBridge) return;
   intentionalClose = false;
   activeConfig = { ...config };
   reconnectDelayMs = BASE_RECONNECT_MS;

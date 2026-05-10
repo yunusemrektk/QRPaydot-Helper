@@ -9,22 +9,36 @@ const router = Router();
 
 /**
  * POST /v1/credentials
- * Panelden: token + merchantId + apiBaseUrl (örn. http://192.168.1.2:3001/api) — WS ile PRINT_JOB dinlenir.
+ * Panel: jwt token + merchantId + apiBaseUrl, veya bridgeKey + merchantId + apiBaseUrl.
  */
 router.post('/v1/credentials', (req, res) => {
   try {
     const body = req.body || {};
     const token = typeof body.token === 'string' ? body.token.trim() : '';
+    const bridgeKey = typeof body.bridgeKey === 'string' ? body.bridgeKey.trim() : '';
     const merchantId = typeof body.merchantId === 'string' ? body.merchantId.trim() : '';
     const apiBaseUrl = typeof body.apiBaseUrl === 'string' ? body.apiBaseUrl.trim() : '';
 
-    if (!token || !merchantId || !apiBaseUrl) {
-      return res.status(400).json({ error: 'token, merchantId, apiBaseUrl required' });
+    if (!merchantId || !apiBaseUrl) {
+      return res.status(400).json({ error: 'merchantId, apiBaseUrl required' });
+    }
+    if (!token && !bridgeKey) {
+      return res.status(400).json({ error: 'token or bridgeKey required' });
     }
 
-    setBackendConnection({ token, merchantId, apiBaseUrl });
-    startBackendWs({ token, merchantId, apiBaseUrl });
-    appendServiceLog('[credentials] saved + backend WS starting');
+    const payload = bridgeKey
+      ? { bridgeKey, merchantId, apiBaseUrl, token: '' }
+      : { token, merchantId, apiBaseUrl, bridgeKey: '' };
+
+    setBackendConnection(payload);
+    const saved = getBackendConnection();
+    if (!saved) {
+      return res.status(500).json({ error: 'failed to persist credentials' });
+    }
+    startBackendWs(saved);
+    appendServiceLog(
+      bridgeKey ? '[credentials] saved (bridge key) + backend WS starting' : '[credentials] saved + backend WS starting',
+    );
     const st = getBackendWsState();
     return res.json({ ok: true, backendWs: st.backendWs });
   } catch (err) {
@@ -33,7 +47,7 @@ router.post('/v1/credentials', (req, res) => {
   }
 });
 
-/** GET /v1/credentials — token döndürmez */
+/** GET /v1/credentials — secret döndürmez */
 router.get('/v1/credentials', (_req, res) => {
   const c = getBackendConnection();
   const st = getBackendWsState();
@@ -42,6 +56,7 @@ router.get('/v1/credentials', (_req, res) => {
   }
   return res.json({
     hasToken: true,
+    authMode: c.bridgeKey ? 'bridge' : 'jwt',
     merchantId: c.merchantId,
     backendWs: st.backendWs,
   });

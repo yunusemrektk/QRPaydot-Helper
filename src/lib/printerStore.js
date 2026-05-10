@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { getBackendWsApiBaseOverride } = require('../config');
 
 const STORE_DIR = path.join(process.env.APPDATA || os.homedir(), 'QRPaydotHelper');
 const STORE_FILE = path.join(STORE_DIR, 'printers.json');
@@ -39,7 +40,9 @@ function loadStore() {
         data.backendConnection && typeof data.backendConnection === 'object'
           ? {
               apiBaseUrl: String(data.backendConnection.apiBaseUrl || '').trim(),
-              token: String(data.backendConnection.token || ''),
+              token: data.backendConnection.token != null ? String(data.backendConnection.token) : '',
+              bridgeKey:
+                data.backendConnection.bridgeKey != null ? String(data.backendConnection.bridgeKey) : '',
               merchantId: String(data.backendConnection.merchantId || '').trim(),
             }
           : null,
@@ -148,10 +151,19 @@ function getAllPosAssignments() {
 
 function getBackendConnection() {
   const c = loadStore().backendConnection;
-  if (!c || !c.token || !c.merchantId || !c.apiBaseUrl) return null;
+  if (!c || !c.merchantId || !c.apiBaseUrl) return null;
+  const token = c.token != null ? String(c.token) : '';
+  const bridgeKey = c.bridgeKey != null ? String(c.bridgeKey) : '';
+  if (!token.trim() && !bridgeKey.trim()) return null;
+  const diskApi = String(c.apiBaseUrl || '')
+    .trim()
+    .replace(/\/+$/, '');
+  const override = getBackendWsApiBaseOverride();
+  const apiBaseUrl = override || diskApi;
   return {
-    apiBaseUrl: c.apiBaseUrl,
-    token: c.token,
+    apiBaseUrl,
+    token: token.trim(),
+    bridgeKey: bridgeKey.trim(),
     merchantId: c.merchantId,
   };
 }
@@ -161,10 +173,36 @@ function setBackendConnection(obj) {
   if (!obj || typeof obj !== 'object') {
     store.backendConnection = null;
   } else {
+    const prev =
+      store.backendConnection && typeof store.backendConnection === 'object'
+        ? store.backendConnection
+        : {};
+    const merchantId = String(obj.merchantId || '').trim();
+    const apiBaseUrl = String(obj.apiBaseUrl || '').trim();
+    const incomingToken = obj.token != null ? String(obj.token).trim() : '';
+    const incomingBridge = obj.bridgeKey != null ? String(obj.bridgeKey).trim() : '';
+
+    let token = incomingToken;
+    let bridgeKey = incomingBridge;
+
+    if (incomingBridge) {
+      token = '';
+    } else if (incomingToken && !incomingBridge) {
+      const sameMerchant =
+        prev.merchantId && String(prev.merchantId).trim() === merchantId;
+      const prevBridge = prev.bridgeKey != null ? String(prev.bridgeKey).trim() : '';
+      if (sameMerchant && prevBridge) {
+        bridgeKey = prevBridge;
+      } else {
+        bridgeKey = '';
+      }
+    }
+
     store.backendConnection = {
-      apiBaseUrl: String(obj.apiBaseUrl || '').trim(),
-      token: String(obj.token || ''),
-      merchantId: String(obj.merchantId || '').trim(),
+      apiBaseUrl,
+      merchantId,
+      token: bridgeKey ? '' : token,
+      bridgeKey: bridgeKey || '',
     };
   }
   saveStore(store);

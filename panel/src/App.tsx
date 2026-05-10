@@ -8,6 +8,7 @@ import AboutPage from "./pages/AboutPage";
 import OfflinePage from "./pages/OfflinePage";
 import PrinterPage from "./pages/PrinterPage";
 import StatusPage from "./pages/StatusPage";
+import ServiceLogsPage from "./pages/ServiceLogsPage";
 import SupportPage from "./pages/SupportPage";
 import UpdatePage from "./pages/UpdatePage";
 
@@ -25,6 +26,7 @@ export default function App() {
               <Route path="offline" element={<OfflinePage />} />
               <Route path="update" element={<UpdatePage />} />
               <Route path="support" element={<SupportPage />} />
+              <Route path="service-logs" element={<ServiceLogsPage />} />
               <Route path="about" element={<AboutPage />} />
             </Route>
           </Routes>

@@ -4,6 +4,7 @@ const { Router } = require('express');
 const { fetch: undiciFetch, Agent } = require('undici');
 const { getPosAssignment } = require('../lib/printerStore');
 const { isPrivateOrLocalHost } = require('../config');
+const { appendServiceLog } = require('../lib/logger');
 const os = require('os');
 const dgram = require('dgram');
 
@@ -131,9 +132,20 @@ function padSoftwareId10(raw) {
   return s.padEnd(10, '0');
 }
 
+function summarizeHuginJson(json) {
+  if (!json || typeof json !== 'object') return 'no-json';
+  const st = String(json.status || '').trim() || '?';
+  const title =
+    json.error && typeof json.error === 'object' && json.error.title != null
+      ? String(json.error.title).slice(0, 100)
+      : '';
+  return title ? `${st} (${title})` : st;
+}
+
 async function huginFetch(posDeviceId, path, init, headersExtra) {
   const ep = getPosAssignment(posDeviceId);
   if (!ep || !ep.host || !(Number(ep.port) > 0)) {
+    appendServiceLog(`[hugin-proxy] blocked pos=${posDeviceId} reason=POS_NOT_ASSIGNED`);
     const err = new Error('POS_NOT_ASSIGNED');
     err.code = 'POS_NOT_ASSIGNED';
     throw err;
@@ -151,6 +163,9 @@ async function huginFetch(posDeviceId, path, init, headersExtra) {
 
   const token = vukTokenByPosId.get(posDeviceId);
   if (token) headers.Authorization = `Bearer ${token}`;
+
+  const method = String((init && init.method) || 'GET').toUpperCase();
+  const relPath = String(path).replace(/^\/+/, '');
 
   dbg('request', {
     posDeviceId,
@@ -173,14 +188,23 @@ async function huginFetch(posDeviceId, path, init, headersExtra) {
     body: init.body != null ? JSON.stringify(init.body) : undefined,
     ...(relaxTls ? { dispatcher: getHuginInsecureDispatcher() } : {}),
   };
-  const res = await undiciFetch(url, fetchOpts);
+  try {
+    const res = await undiciFetch(url, fetchOpts);
 
-  const json = await res.json().catch(() => null);
-  dbg('response', { posDeviceId, from: url, httpStatus: res.status, json });
-  if (json && typeof json.token === 'string' && json.token.trim()) {
-    vukTokenByPosId.set(posDeviceId, json.token.trim());
+    const json = await res.json().catch(() => null);
+    dbg('response', { posDeviceId, from: url, httpStatus: res.status, json });
+    if (json && typeof json.token === 'string' && json.token.trim()) {
+      vukTokenByPosId.set(posDeviceId, json.token.trim());
+    }
+    appendServiceLog(
+      `[hugin-proxy] ${method} ${relPath} pos=${posDeviceId} -> HTTP ${res.status} ${summarizeHuginJson(json)}`,
+    );
+    return { httpStatus: res.status, json };
+  } catch (err) {
+    const msg = err && err.message ? String(err.message).slice(0, 240) : String(err);
+    appendServiceLog(`[hugin-proxy] ${method} ${relPath} pos=${posDeviceId} -> FETCH_ERR ${msg}`);
+    throw err;
   }
-  return { httpStatus: res.status, json };
 }
 
 function parseActiveDocumentId(payload) {

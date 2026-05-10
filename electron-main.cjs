@@ -7,6 +7,13 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 
+/** Görev yöneticisi, bildirimler ve bazı Windows güvenlik uyarıları; geliştirme (electron .) dahil. */
+const APP_DISPLAY_NAME = 'QRPaydot Helper';
+app.setName(APP_DISPLAY_NAME);
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.qrpaydot.helper');
+}
+
 const autoUpdater = require('./src/lib/autoUpdater');
 
 const ROOT = __dirname;
@@ -230,7 +237,6 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', showWindow);
-  app.setName('QRPaydot Helper');
 
   app.whenReady().then(async () => {
     setApplicationMenuChromeless();

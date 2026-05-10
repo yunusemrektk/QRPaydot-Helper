@@ -4,6 +4,7 @@ import {
   Headphones,
   Info,
   Printer,
+  ScrollText,
   WifiOff,
 } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
@@ -16,6 +17,7 @@ const titles: Record<string, string> = {
   "/offline": "Çevrimdışı mod",
   "/update": "Güncelleme",
   "/support": "Destek",
+  "/service-logs": "Servis günlükleri",
   "/about": "Hakkında",
 };
 
@@ -77,6 +79,16 @@ export default function AppLayout() {
               Çevrimdışı mod
               <span className="badge-pill">Yakında</span>
             </NavLink>
+
+            {serviceUnlocked ? (
+              <>
+                <div className="nav-label">Servis</div>
+                <NavLink to="/service-logs" className={navClass}>
+                  <ScrollText strokeWidth={2} />
+                  Günlükler
+                </NavLink>
+              </>
+            ) : null}
 
             <div className="nav-label">Sistem</div>
             <NavLink to="/update" className={navClass}>

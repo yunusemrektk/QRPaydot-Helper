@@ -1,6 +1,6 @@
 {
   "name": "qrpaydot-helper",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "description": "QRPaydot Helper — local HTTP → RAW TCP (JetDirect) bridge for thermal printers. Merchant-Dash EXTERNAL mode.",
   "repository": {
@@ -9,17 +9,20 @@
   },
   "main": "electron-main.cjs",
   "scripts": {
+    "embed-backend-api": "node scripts/write-embed-backend-api.cjs",
+    "prestart": "node scripts/write-embed-backend-api.cjs",
+    "predev": "node scripts/write-embed-backend-api.cjs",
     "start": "node src/index.js",
     "dev": "node src/index.js",
-    "desktop": "electron .",
+    "desktop": "node scripts/write-embed-backend-api.cjs && electron .",
     "panel:install": "npm install --prefix panel",
     "panel:build": "npm run build --prefix panel",
     "panel:dev": "npm run dev --prefix panel",
-    "build:win": "npm run panel:build && electron-builder --win --dir",
-    "build:installer": "npm run panel:build && electron-builder --win nsis",
+    "build:win": "cross-env PRINT_BRIDGE_BUILD_PROFILE=production node scripts/write-embed-backend-api.cjs && npm run panel:build && electron-builder --win --dir && cross-env PRINT_BRIDGE_BUILD_PROFILE=development node scripts/write-embed-backend-api.cjs",
+    "build:installer": "cross-env PRINT_BRIDGE_BUILD_PROFILE=production node scripts/write-embed-backend-api.cjs && npm run panel:build && electron-builder --win nsis && cross-env PRINT_BRIDGE_BUILD_PROFILE=development node scripts/write-embed-backend-api.cjs",
     "build:release:win": "npm run build:installer",
     "postinstall": "patch-package",
-    "publish:win": "npm run panel:build && cross-env EP_DRAFT=false EP_PRE_RELEASE=false EP_GH_IGNORE_TIME=true dotenv -- electron-builder --win nsis --publish always"
+    "publish:win": "cross-env PRINT_BRIDGE_BUILD_PROFILE=production node scripts/write-embed-backend-api.cjs && npm run panel:build && cross-env EP_DRAFT=false EP_PRE_RELEASE=false EP_GH_IGNORE_TIME=true dotenv -- electron-builder --win nsis --publish always && cross-env PRINT_BRIDGE_BUILD_PROFILE=development node scripts/write-embed-backend-api.cjs"
   },
   "build": {
     "appId": "com.qrpaydot.helper",
@@ -56,12 +59,13 @@
       "oneClick": true,
       "perMachine": false,
       "allowToChangeInstallationDirectory": false,
+      "artifactName": "QRPaydot.Helper.Setup.${ext}",
+      "uninstallDisplayName": "QRPaydot Helper",
       "installerIcon": "installer/QRPaydotHelper.ico",
       "uninstallerIcon": "installer/QRPaydotHelper.ico",
       "shortcutName": "QRPaydot Helper",
       "menuCategory": "QRPaydot",
-      "include": "installer/nsis-extras.nsh",
-      "artifactName": "QRPaydot.Helper.Setup.${ext}"
+      "include": "installer/nsis-extras.nsh"
     }
   },
   "engines": {
