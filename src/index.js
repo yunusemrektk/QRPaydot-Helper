@@ -18,7 +18,7 @@ const {
 } = require('./lib/logger');
 const { createApp } = require('./app');
 const { runScan } = require('./routes/scan');
-const { getBackendConnection, ensurePrintDefaults } = require('./lib/printerStore');
+const { getBackendConnection, ensurePrintDefaults, migratePackagedBackendApiBaseIfStale } = require('./lib/printerStore');
 const { startBackendWs } = require('./lib/backendWsClient');
 
 appendServiceLogEarly(`boot isPkgExe=${isPkgExe} argv=${JSON.stringify(process.argv)}`);
@@ -81,6 +81,12 @@ const server = app.listen(PORT, BIND, () => {
   const panelOk = fs.existsSync(panelIdx);
   appendServiceLog(`listening ${base} publicDir=${publicDir} panelIndex=${panelOk}`);
   ensurePrintDefaults();
+  const apiBaseMigration = migratePackagedBackendApiBaseIfStale();
+  if (apiBaseMigration.migrated) {
+    const msg = `printers.json API tabanı güncellendi (${apiBaseMigration.from} → ${apiBaseMigration.to}). Eski LAN kimlik bilgisi silindi — mobil veya ${getMerchantDashUrl()} üzerinden Ayarlar → Yazdırma ile tekrar kaydedin.`;
+    appendServiceLog(`[boot] ${msg}`);
+    console.warn(`[${SERVICE_SLUG}] ${msg}`);
+  }
 
   if (BIND === '0.0.0.0' && String(process.env.PRINT_BRIDGE_SILENCE_PUBLIC_BIND_WARNING || '').trim() !== '1') {
     const msg =

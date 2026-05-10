@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { getBackendWsApiBaseOverride } = require('../config');
+const { getBackendWsApiBaseOverride, getEmbeddedBackendApiBase, isPackagedForDistribution, isLikelyDevLanApiBaseUrl } = require('../config');
 
 const STORE_DIR = path.join(process.env.APPDATA || os.homedir(), 'QRPaydotHelper');
 const STORE_FILE = path.join(STORE_DIR, 'printers.json');
@@ -216,6 +216,38 @@ function getPrintDefaults() {
   return { encoding: 'ascii' };
 }
 
+/**
+ * Paketli prod kurulum: diskte eski LAN/dev `apiBaseUrl` kalmışsa gömülü prod tabana çekilir.
+ * JWT/bridgeKey o eski host için üretilmiş olacağından temizlenir; merchantId kalır — mobil/panelden bir kez yeniden kayıt.
+ */
+function migratePackagedBackendApiBaseIfStale() {
+  if (!isPackagedForDistribution()) return { migrated: false };
+  const embedded = getEmbeddedBackendApiBase();
+  if (!embedded) return { migrated: false };
+
+  const store = loadStore();
+  const bc = store.backendConnection;
+  if (!bc || typeof bc !== 'object' || !String(bc.merchantId || '').trim()) {
+    return { migrated: false };
+  }
+
+  const disk = String(bc.apiBaseUrl || '')
+    .trim()
+    .replace(/\/+$/, '');
+  if (!disk) return { migrated: false };
+  if (disk === embedded) return { migrated: false };
+  if (!isLikelyDevLanApiBaseUrl(disk)) return { migrated: false };
+
+  store.backendConnection = {
+    apiBaseUrl: embedded,
+    merchantId: String(bc.merchantId || '').trim(),
+    token: '',
+    bridgeKey: '',
+  };
+  saveStore(store);
+  return { migrated: true, from: disk, to: embedded };
+}
+
 /** Eski printers.json dosyasına varsayılan fiş kodlaması yazar (v1.0.1+). */
 function ensurePrintDefaults() {
   try {
@@ -256,4 +288,5 @@ module.exports = {
   setBackendConnection,
   getPrintDefaults,
   ensurePrintDefaults,
+  migratePackagedBackendApiBaseIfStale,
 };

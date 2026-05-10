@@ -100,7 +100,8 @@ export default function StatusPage() {
     if (open && authed) {
       wsCk = "ok";
       wsBadge = "Bağlı";
-      wsSub = "QRPaydot sunucusuna WebSocket ile bağlı";
+      wsSub =
+        "Sunucunun ittiği uzak fiş / POS işleri bu kanalda; yerel Hugin HTTP (telefon veya panelden) buna bağlı değil";
     } else if (!open) {
       wsCk = "fail";
       wsBadge = "Kapalı";
@@ -296,7 +297,7 @@ export default function StatusPage() {
                 icon={Radio}
               />
               <div className="ck-label">
-                <strong>Sunucu (POS / yazdırma)</strong>
+                <strong>QRPaydot sunucu (WebSocket)</strong>
                 <span>{wsSub}</span>
               </div>
               <span

@@ -176,6 +176,8 @@ Helper, **merchant-dash ile aynı** kök `.env` dosyasını okur (`merchant-dash
 | `VITE_API_BASE_URL` | — | `node` veya `HELPER_MERCHANT_DASH_FROM_VITE=1` iken LAN host türevi. |
 | `MERCHANT_DASH_OPEN` | `1` (açık) | `0` = merchant panelini tarayıcıda otomatik açma. |
 
+**Paketli Setup (prod) ve `printers.json`:** Geliştirme sırasında diske yazılmış LAN/localhost `apiBaseUrl` (ör. `http://192.168.x.x:3001/api`) kurulu prod Helper ile **uyumsuz** kalırdı. Paketli uygulama açılışında, gömülü prod API tabanı (`embedBackendApi.cjs`, yayın öncesi `npm run publish:win`) ile karşılaştırılır; diskteki taban özel ağ/localhost ise **dosyada** prod tabanına çekilir, **token ve bridgeKey** (eski host için üretilmiş) **silinir**, `merchantId` korunur. Ardından mobil veya işletme panelinden **Ayarlar → Yazdırma** ile kimlik bir kez yeniden kaydedilmelidir.
+
 ## Diğer dağıtım seçenekleri
 
 - **Geliştirici / sunucu benzeri PC:** kaynak veya `npm ci --omit=dev` + `node src/index.js`; Görev Zamanlayıcı ile oturum açılışında çalıştırılabilir.

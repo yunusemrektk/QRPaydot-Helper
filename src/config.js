@@ -171,6 +171,18 @@ function getBackendWsApiBaseOverride() {
   return getEmbeddedBackendApiBase();
 }
 
+function isLikelyDevLanApiBaseUrl(raw) {
+  const s = trimEnv(raw);
+  if (!s) return false;
+  try {
+    const href = /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `http://${s}`;
+    const u = new URL(href);
+    return isPrivateOrLocalHost(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
 module.exports = {
   PORT,
   BIND,
@@ -182,5 +194,8 @@ module.exports = {
   getMerchantDashUrl,
   shouldOpenMerchantDash,
   isPrivateOrLocalHost,
+  isLikelyDevLanApiBaseUrl,
+  getEmbeddedBackendApiBase,
+  isPackagedForDistribution,
   getBackendWsApiBaseOverride,
 };
