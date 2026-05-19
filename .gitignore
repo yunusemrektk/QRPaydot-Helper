@@ -4,3 +4,11 @@ node_modules/
 dist/
 public/panel/
 panel/node_modules/
+src/generated/
+.cursor/
+
+# Test results
+coverage/
+.nyc_output/
+*.lcov
+test-results/
