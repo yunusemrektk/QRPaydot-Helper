@@ -1,6 +1,6 @@
 {
   "name": "qrpaydot-helper",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "private": true,
   "description": "QRPaydot Helper — local HTTP → RAW TCP (JetDirect) bridge for thermal printers. Merchant-Dash EXTERNAL mode.",
   "repository": {

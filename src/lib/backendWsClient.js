@@ -85,8 +85,6 @@ async function handlePrintJobPayload(data) {
     appendServiceLog('[backend-ws] PRINT_JOB deduped (same payload)');
     return;
   }
-  lastPrintJobFingerprint = fp;
-  lastPrintJobAt = now;
   const ep = getAssignment(printerId) || getAssignment(printerId.toLowerCase());
   if (!ep || !ep.host) {
     appendServiceLog(`[backend-ws] no LAN assignment for printerId=${printerId}`);
@@ -97,6 +95,8 @@ async function handlePrintJobPayload(data) {
   const cut = data.cut !== false;
   const buf = buildEscPosPayload(text, enc, undefined, { cancelDoubleByte: false });
   await sendToPrinter(ep.host, ep.port, [buf], cut);
+  lastPrintJobFingerprint = fp;
+  lastPrintJobAt = Date.now();
   appendServiceLog(`[backend-ws] printed job printerId=${printerId} -> ${ep.host}:${ep.port}`);
 }
 
