@@ -1,12 +1,12 @@
 'use strict';
 
-const crypto = require('crypto');
 const WebSocket = require('ws');
 const { appendServiceLog } = require('./logger');
 const { getAssignment, getPrintDefaults } = require('./printerStore');
 const { buildEscPosPayload } = require('./escpos');
 const { sendToPrinter } = require('./printer');
 const { normalizePrintEncoding } = require('./encoding');
+const { shouldSkipDuplicatePhysicalPrint } = require('./physicalPrintDedupe');
 
 let ws = null;
 let reconnectTimer = null;
@@ -14,11 +14,6 @@ let activeConfig = null;
 let authenticated = false;
 let intentionalClose = false;
 let lastError = null;
-
-/** Aynı PRINT_JOB kısa sürede iki kez gelirse (yeniden bağlanma vb.) tek çıktı. */
-let lastPrintJobFingerprint = '';
-let lastPrintJobAt = 0;
-const PRINT_JOB_DEDUPE_MS = 2800;
 
 const BASE_RECONNECT_MS = 4000;
 const MAX_RECONNECT_MS = 60000;
@@ -74,14 +69,17 @@ async function handlePrintJobPayload(data) {
     appendServiceLog('[backend-ws] PRINT_JOB missing printerId or text');
     return;
   }
-  const digest = crypto.createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 40);
   const dedupeBase =
     data.printDedupeKey != null && String(data.printDedupeKey).trim()
       ? String(data.printDedupeKey).trim().slice(0, 512)
       : '';
-  const fp = dedupeBase ? `${printerId}|${dedupeBase}|${digest}` : `${printerId}|${digest}`;
-  const now = Date.now();
-  if (fp === lastPrintJobFingerprint && now - lastPrintJobAt < PRINT_JOB_DEDUPE_MS) {
+  if (
+    shouldSkipDuplicatePhysicalPrint({
+      text,
+      printDedupeKey: dedupeBase || null,
+      printerId,
+    })
+  ) {
     appendServiceLog('[backend-ws] PRINT_JOB deduped (same payload)');
     return;
   }
@@ -95,8 +93,6 @@ async function handlePrintJobPayload(data) {
   const cut = data.cut !== false;
   const buf = buildEscPosPayload(text, enc, undefined, { cancelDoubleByte: false });
   await sendToPrinter(ep.host, ep.port, [buf], cut);
-  lastPrintJobFingerprint = fp;
-  lastPrintJobAt = Date.now();
   appendServiceLog(`[backend-ws] printed job printerId=${printerId} -> ${ep.host}:${ep.port}`);
 }
 

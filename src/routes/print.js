@@ -1,6 +1,5 @@
 'use strict';
 
-const crypto = require('crypto');
 const { Router } = require('express');
 const iconv = require('iconv-lite');
 const { SERVICE_VERSION } = require('../config');
@@ -14,18 +13,9 @@ const {
 const { buildEscPosPayload, withTrailingFeeds } = require('../lib/escpos');
 const { sendToPrinter } = require('../lib/printer');
 const { getPrintDefaults } = require('../lib/printerStore');
+const { shouldSkipDuplicatePhysicalPrint } = require('../lib/physicalPrintDedupe');
 
 const router = Router();
-
-/** Tarayıcı PRINT_JOB yedek yolu + doğrudan /v1/print aynı anda tetiklenirse tek fiziksel çıktı. */
-let lastV1PrintKey = '';
-let lastV1PrintAt = 0;
-const V1_PRINT_DEDUPE_MS = 3500;
-
-function v1PrintFingerprint(host, port, text) {
-  const h = crypto.createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 32);
-  return `${host}:${port}|${h}`;
-}
 
 /**
  * POST /v1/print
@@ -59,13 +49,19 @@ router.post('/v1/print', async (req, res) => {
     const host = target.host.trim();
     const port = Number(target.port) > 0 ? Number(target.port) : 9100;
 
-    const fp = v1PrintFingerprint(host, port, text);
-    const now = Date.now();
-    if (fp === lastV1PrintKey && now - lastV1PrintAt < V1_PRINT_DEDUPE_MS) {
+    if (
+      shouldSkipDuplicatePhysicalPrint({
+        text,
+        host,
+        port,
+        printDedupeKey:
+          body.printDedupeKey != null && String(body.printDedupeKey).trim()
+            ? String(body.printDedupeKey).trim()
+            : null,
+      })
+    ) {
       return res.json({ ok: true, deduped: true });
     }
-    lastV1PrintKey = fp;
-    lastV1PrintAt = now;
 
     const buf = buildEscPosPayload(text, enc, codePageOverride, { cancelDoubleByte });
     await sendToPrinter(host, port, [buf], cut);
