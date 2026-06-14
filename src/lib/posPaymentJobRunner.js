@@ -4,7 +4,7 @@ const { fetch: undiciFetch } = require('undici');
 const { PORT } = require('../config');
 const { getPosAssignment, getBackendConnection } = require('./printerStore');
 const { backendBearerForApi, hasBackendCallbackAuth } = require('./backendCallbackAuth');
-const { appendServiceLog } = require('./logger');
+const { classifyHuginStatusJson, isLikelyLostPosResponseError } = require('./huginReachability');
 
 let lastPosJobId = '';
 let lastPosJobAt = 0;
@@ -97,8 +97,10 @@ async function pollDocumentSuccessOnDevice(localBase, qBase, documentId) {
     if (i > 0) await new Promise((r) => setTimeout(r, delayMs));
     const stRes = await undiciFetch(`${localBase}/v1/pos/status?${qBase.toString()}`, { method: 'GET' });
     const stJson = await stRes.json().catch(() => null);
-    if (!stJson || stJson.status !== 'SUCCESS' || !stJson.data) continue;
-    if (findSuccessfulReceiptInLastDocuments(stJson.data, documentId)) return true;
+    const cls = classifyHuginStatusJson(stJson);
+    if (cls.kind === 'reachable_issue') return false;
+    if (cls.kind === 'unreachable') continue;
+    if (findSuccessfulReceiptInLastDocuments(cls.data, documentId)) return true;
   }
   return false;
 }
@@ -159,12 +161,16 @@ async function runPosPaymentJobFromWs(data) {
     // Terminal hazır mı (BillingModal assertHuginTerminalIdle)
     const stRes = await undiciFetch(`${localBase}/v1/pos/status?${qBase.toString()}`, { method: 'GET' });
     const stJson = await stRes.json().catch(() => null);
-    if (!stJson || stJson.status !== 'SUCCESS') {
-      throw new Error(formatHuginErr(stJson && stJson.error));
+    const stCls = classifyHuginStatusJson(stJson);
+    if (stCls.kind === 'unreachable') {
+      throw new Error(stCls.message || 'POS status unreachable');
     }
-    const stateRaw = stJson.data && stJson.data.state != null ? String(stJson.data.state).trim().toUpperCase() : '';
+    if (stCls.kind === 'reachable_issue') {
+      throw new Error(stCls.message || 'POS not ready');
+    }
+    const stateRaw = stCls.data && stCls.data.state != null ? String(stCls.data.state).trim().toUpperCase() : '';
     if (stateRaw === 'SERVICE' || stateRaw === 'PREPARATION' || stateRaw === 'ERROR') {
-      throw new Error(`ÖKC durumu uygun değil (state: ${stJson.data.state}).`);
+      throw new Error(`ÖKC durumu uygun değil (state: ${stCls.data.state}).`);
     }
 
     const itemsTotal = huginLines && huginLines.length
@@ -202,7 +208,7 @@ async function runPosPaymentJobFromWs(data) {
       );
       const paid = await paidRes.json().catch(() => null);
       if (!paid || paid.status !== 'SUCCESS') {
-        if (await pollDocumentSuccessOnDevice(localBase, qBase, documentId)) {
+        if (isLikelyLostPosResponseError(paid && paid.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId))) {
           appendServiceLog(`[backend-ws] POS_PAYMENT_JOB recovered via lastDocuments jobId=${jobId}`);
           await postJobComplete(cfg, merchantId, jobId, {
             status: 'SUCCESS',
@@ -256,7 +262,7 @@ async function runPosPaymentJobFromWs(data) {
       );
       const fin = await finRes.json().catch(() => null);
       if (!fin || fin.status !== 'SUCCESS') {
-        if (await pollDocumentSuccessOnDevice(localBase, qBase, documentId)) {
+        if (isLikelyLostPosResponseError(fin && fin.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId))) {
           appendServiceLog(
             `[backend-ws] POS_PAYMENT_JOB recovered via lastDocuments (finalize) jobId=${jobId}`,
           );
@@ -310,7 +316,7 @@ async function runPosPaymentJobFromWs(data) {
     );
     const fin = await finRes.json().catch(() => null);
     if (!fin || fin.status !== 'SUCCESS') {
-      if (await pollDocumentSuccessOnDevice(localBase, qBase, documentId)) {
+      if (isLikelyLostPosResponseError(fin && fin.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId))) {
         appendServiceLog(
           `[backend-ws] POS_PAYMENT_JOB recovered via lastDocuments (cash finalize) jobId=${jobId}`,
         );
@@ -413,4 +419,4 @@ async function postJobComplete(cfg, merchantId, jobId, payload) {
   }
 }
 
-module.exports = { runPosPaymentJobFromWs };
+module.exports = { runPosPaymentJobFromWs, buildFinalizeBody };

@@ -13,13 +13,9 @@ function textDigest(text) {
   return crypto.createHash('sha256').update(String(text), 'utf8').digest('hex').slice(0, 32);
 }
 
-/**
- * @param {{ text: string, printDedupeKey?: string | null, printerId?: string | null, host?: string | null, port?: number | null }} opts
- * @returns {boolean} true → bu istek atlanmalı (yakın zamanda basıldı)
- */
-function shouldSkipDuplicatePhysicalPrint(opts) {
+function buildFingerprint(opts) {
   const text = typeof opts.text === 'string' ? opts.text : '';
-  if (!text) return false;
+  if (!text) return null;
 
   const digest = textDigest(text);
   const dedupeKey =
@@ -27,19 +23,28 @@ function shouldSkipDuplicatePhysicalPrint(opts) {
       ? String(opts.printDedupeKey).trim().slice(0, 512)
       : '';
 
-  let fp;
   if (dedupeKey) {
-    fp = `${dedupeKey}|${digest}`;
-  } else if (opts.printerId) {
-    fp = `p:${String(opts.printerId).trim()}|${digest}`;
-  } else if (opts.host) {
-    const port = Number(opts.port) > 0 ? Number(opts.port) : 9100;
-    fp = `h:${String(opts.host).trim()}:${port}|${digest}`;
-  } else {
-    fp = digest;
+    return `${dedupeKey}|${digest}`;
   }
+  if (opts.printerId) {
+    return `p:${String(opts.printerId).trim()}|${digest}`;
+  }
+  if (opts.host) {
+    const port = Number(opts.port) > 0 ? Number(opts.port) : 9100;
+    return `h:${String(opts.host).trim()}:${port}|${digest}`;
+  }
+  return digest;
+}
 
-  const digestOnly = `d:${digest}`;
+/**
+ * @param {{ text: string, printDedupeKey?: string | null, printerId?: string | null, host?: string | null, port?: number | null }} opts
+ * @returns {boolean} true → bu istek atlanmalı (yakın zamanda başarıyla basıldı)
+ */
+function shouldSkipDuplicatePhysicalPrint(opts) {
+  const fp = buildFingerprint(opts);
+  if (!fp) return false;
+
+  const digestOnly = `d:${textDigest(opts.text)}`;
   const now = Date.now();
   if (fp === lastFingerprint && now - lastAt < DEDUPE_MS) {
     return true;
@@ -47,12 +52,21 @@ function shouldSkipDuplicatePhysicalPrint(opts) {
   if (digestOnly === lastDigestFingerprint && now - lastDigestAt < DEDUPE_MS) {
     return true;
   }
+  return false;
+}
 
+/**
+ * Başarılı fiziksel baskıdan sonra dedupe kaydı güncellenir (başarısız deneme tekrarı engellemez).
+ */
+function recordSuccessfulPhysicalPrint(opts) {
+  const fp = buildFingerprint(opts);
+  if (!fp) return;
+  const digestOnly = `d:${textDigest(opts.text)}`;
+  const now = Date.now();
   lastFingerprint = fp;
   lastAt = now;
   lastDigestFingerprint = digestOnly;
   lastDigestAt = now;
-  return false;
 }
 
-module.exports = { shouldSkipDuplicatePhysicalPrint };
+module.exports = { shouldSkipDuplicatePhysicalPrint, recordSuccessfulPhysicalPrint };

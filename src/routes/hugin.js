@@ -591,5 +591,133 @@ router.post('/documents/:documentId/cancel', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Banka İşlemleri — POS transaction list, detail, void, refund, prev batch
+// ---------------------------------------------------------------------------
+
+router.get('/pos/transactions', async (req, res) => {
+  try {
+    const posDeviceId = String(req.query.posDeviceId || '').trim();
+    const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
+    const serialNo = String(req.query.serialNo || '').trim();
+    if (!posDeviceId) return res.status(400).json({ status: 'ERROR', error: { title: 'posDeviceId gerekli' } });
+    if (!softwareId.trim()) return res.status(400).json({ status: 'ERROR', error: { title: 'softwareId gerekli' } });
+    if (!serialNo) return res.status(400).json({ status: 'ERROR', error: { title: 'serialNo gerekli' } });
+
+    const r = await huginFetch(
+      posDeviceId,
+      'pos/transactions',
+      { method: 'GET' },
+      { 'X-SoftwareId': softwareId, 'X-SerialNo': serialNo },
+    );
+    return res.status(r.httpStatus).json(r.json || { status: 'ERROR', error: { title: 'Invalid response' } });
+  } catch (e) {
+    if (e && e.code === 'POS_NOT_ASSIGNED') {
+      return res.status(400).json({ status: 'ERROR', error: { title: 'POS bu PC\'de atanmadı' } });
+    }
+    return res.status(502).json({ status: 'ERROR', error: { title: 'Failed to fetch' } });
+  }
+});
+
+router.get('/pos/transactions/:transactionId', async (req, res) => {
+  try {
+    const posDeviceId = String(req.query.posDeviceId || '').trim();
+    const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
+    const serialNo = String(req.query.serialNo || '').trim();
+    const transactionId = String(req.params.transactionId || '').trim();
+    if (!posDeviceId) return res.status(400).json({ status: 'ERROR', error: { title: 'posDeviceId gerekli' } });
+    if (!softwareId.trim()) return res.status(400).json({ status: 'ERROR', error: { title: 'softwareId gerekli' } });
+    if (!serialNo) return res.status(400).json({ status: 'ERROR', error: { title: 'serialNo gerekli' } });
+    if (!transactionId) return res.status(400).json({ status: 'ERROR', error: { title: 'transactionId gerekli' } });
+
+    const r = await huginFetch(
+      posDeviceId,
+      `pos/transactions/${encodeURIComponent(transactionId)}`,
+      { method: 'GET' },
+      { 'X-SoftwareId': softwareId, 'X-SerialNo': serialNo },
+    );
+    return res.status(r.httpStatus).json(r.json || { status: 'ERROR', error: { title: 'Invalid response' } });
+  } catch (e) {
+    if (e && e.code === 'POS_NOT_ASSIGNED') {
+      return res.status(400).json({ status: 'ERROR', error: { title: 'POS bu PC\'de atanmadı' } });
+    }
+    return res.status(502).json({ status: 'ERROR', error: { title: 'Failed to fetch' } });
+  }
+});
+
+router.post('/pos/transactions/:transactionId/void', async (req, res) => {
+  try {
+    const posDeviceId = String(req.query.posDeviceId || '').trim();
+    const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
+    const serialNo = String(req.query.serialNo || '').trim();
+    const transactionId = String(req.params.transactionId || '').trim();
+    if (!posDeviceId) return res.status(400).json({ status: 'ERROR', error: { title: 'posDeviceId gerekli' } });
+    if (!softwareId.trim()) return res.status(400).json({ status: 'ERROR', error: { title: 'softwareId gerekli' } });
+    if (!serialNo) return res.status(400).json({ status: 'ERROR', error: { title: 'serialNo gerekli' } });
+    if (!transactionId) return res.status(400).json({ status: 'ERROR', error: { title: 'transactionId gerekli' } });
+
+    const r = await huginFetch(
+      posDeviceId,
+      `pos/transactions/${encodeURIComponent(transactionId)}/void`,
+      { method: 'POST', body: req.body || {} },
+      { 'X-SoftwareId': softwareId, 'X-SerialNo': serialNo },
+    );
+    return res.status(r.httpStatus).json(r.json || { status: 'ERROR', error: { title: 'Invalid response' } });
+  } catch (e) {
+    if (e && e.code === 'POS_NOT_ASSIGNED') {
+      return res.status(400).json({ status: 'ERROR', error: { title: 'POS bu PC\'de atanmadı' } });
+    }
+    return res.status(502).json({ status: 'ERROR', error: { title: 'Failed to fetch' } });
+  }
+});
+
+router.post('/pos/refunds', async (req, res) => {
+  try {
+    const posDeviceId = String(req.query.posDeviceId || '').trim();
+    const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
+    const serialNo = String(req.query.serialNo || '').trim();
+    if (!posDeviceId) return res.status(400).json({ status: 'ERROR', error: { title: 'posDeviceId gerekli' } });
+    if (!softwareId.trim()) return res.status(400).json({ status: 'ERROR', error: { title: 'softwareId gerekli' } });
+    if (!serialNo) return res.status(400).json({ status: 'ERROR', error: { title: 'serialNo gerekli' } });
+
+    const r = await huginFetch(
+      posDeviceId,
+      'pos/refunds',
+      { method: 'POST', body: req.body || {} },
+      { 'X-SoftwareId': softwareId, 'X-SerialNo': serialNo },
+    );
+    return res.status(r.httpStatus).json(r.json || { status: 'ERROR', error: { title: 'Invalid response' } });
+  } catch (e) {
+    if (e && e.code === 'POS_NOT_ASSIGNED') {
+      return res.status(400).json({ status: 'ERROR', error: { title: 'POS bu PC\'de atanmadı' } });
+    }
+    return res.status(502).json({ status: 'ERROR', error: { title: 'Failed to fetch' } });
+  }
+});
+
+router.get('/pos/batch/previous', async (req, res) => {
+  try {
+    const posDeviceId = String(req.query.posDeviceId || '').trim();
+    const softwareId = padSoftwareId10(String(req.query.softwareId || '').trim());
+    const serialNo = String(req.query.serialNo || '').trim();
+    if (!posDeviceId) return res.status(400).json({ status: 'ERROR', error: { title: 'posDeviceId gerekli' } });
+    if (!softwareId.trim()) return res.status(400).json({ status: 'ERROR', error: { title: 'softwareId gerekli' } });
+    if (!serialNo) return res.status(400).json({ status: 'ERROR', error: { title: 'serialNo gerekli' } });
+
+    const r = await huginFetch(
+      posDeviceId,
+      'pos/batch/previous',
+      { method: 'GET' },
+      { 'X-SoftwareId': softwareId, 'X-SerialNo': serialNo },
+    );
+    return res.status(r.httpStatus).json(r.json || { status: 'ERROR', error: { title: 'Invalid response' } });
+  } catch (e) {
+    if (e && e.code === 'POS_NOT_ASSIGNED') {
+      return res.status(400).json({ status: 'ERROR', error: { title: 'POS bu PC\'de atanmadı' } });
+    }
+    return res.status(502).json({ status: 'ERROR', error: { title: 'Failed to fetch' } });
+  }
+});
+
 module.exports = router;
 

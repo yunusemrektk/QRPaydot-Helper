@@ -13,7 +13,7 @@ const {
 const { buildEscPosPayload, withTrailingFeeds } = require('../lib/escpos');
 const { sendToPrinter } = require('../lib/printer');
 const { getPrintDefaults } = require('../lib/printerStore');
-const { shouldSkipDuplicatePhysicalPrint } = require('../lib/physicalPrintDedupe');
+const { shouldSkipDuplicatePhysicalPrint, recordSuccessfulPhysicalPrint } = require('../lib/physicalPrintDedupe');
 
 const router = Router();
 
@@ -65,6 +65,15 @@ router.post('/v1/print', async (req, res) => {
 
     const buf = buildEscPosPayload(text, enc, codePageOverride, { cancelDoubleByte });
     await sendToPrinter(host, port, [buf], cut);
+    recordSuccessfulPhysicalPrint({
+      text,
+      host,
+      port,
+      printDedupeKey:
+        body.printDedupeKey != null && String(body.printDedupeKey).trim()
+          ? String(body.printDedupeKey).trim()
+          : null,
+    });
 
     if (!wantDebug) {
       return res.json({ ok: true });

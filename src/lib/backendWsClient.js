@@ -6,7 +6,7 @@ const { getAssignment, getPrintDefaults } = require('./printerStore');
 const { buildEscPosPayload } = require('./escpos');
 const { sendToPrinter } = require('./printer');
 const { normalizePrintEncoding } = require('./encoding');
-const { shouldSkipDuplicatePhysicalPrint } = require('./physicalPrintDedupe');
+const { shouldSkipDuplicatePhysicalPrint, recordSuccessfulPhysicalPrint } = require('./physicalPrintDedupe');
 
 let ws = null;
 let reconnectTimer = null;
@@ -93,6 +93,11 @@ async function handlePrintJobPayload(data) {
   const cut = data.cut !== false;
   const buf = buildEscPosPayload(text, enc, undefined, { cancelDoubleByte: false });
   await sendToPrinter(ep.host, ep.port, [buf], cut);
+  recordSuccessfulPhysicalPrint({
+    text,
+    printDedupeKey: dedupeBase || null,
+    printerId,
+  });
   appendServiceLog(`[backend-ws] printed job printerId=${printerId} -> ${ep.host}:${ep.port}`);
 }
 

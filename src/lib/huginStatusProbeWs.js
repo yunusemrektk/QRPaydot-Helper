@@ -5,6 +5,7 @@ const { PORT } = require('../config');
 const { appendServiceLog } = require('./logger');
 const { getBackendConnection } = require('./printerStore');
 const { backendBearerForApi, hasBackendCallbackAuth } = require('./backendCallbackAuth');
+const { classifyHuginStatusJson, isLikelyLostPosResponseError } = require('./huginReachability');
 
 function padSoftwareId10(raw) {
   const s = String(raw || '').trim();
@@ -94,23 +95,21 @@ async function handlePosHuginStatusProbe(wsMsgData) {
       headers: { Accept: 'application/json' },
     });
     const stJson = await stRes.json().catch(() => null);
-    if (!stJson || stJson.status !== 'SUCCESS') {
+    const cls = classifyHuginStatusJson(stJson);
+    if (cls.kind === 'unreachable') {
       out.reachable = false;
-      const errObj = stJson && stJson.error;
-      const t = errObj && typeof errObj === 'object' ? errObj.title || errObj.message : null;
-      out.error = t ? String(t).slice(0, 220) : 'Hugin status not SUCCESS';
+      out.error = cls.message ? String(cls.message).slice(0, 220) : 'Hugin status unreachable';
+    } else if (cls.kind === 'reachable_issue') {
+      out.reachable = true;
+      out.error = cls.message ? String(cls.message).slice(0, 220) : 'POS operational issue';
+      out.state = cls.data && cls.data.state != null ? String(cls.data.state).trim() : null;
+      out.activeDocumentId = pickActiveDocumentId(cls.data);
+      out.activeDocumentHasPayments = activeDocumentHasPaymentsFromStData(cls.data);
     } else {
-      const stateRaw =
-        stJson.data && stJson.data.state != null ? String(stJson.data.state).trim().toUpperCase() : '';
-      out.state = stJson.data && stJson.data.state != null ? String(stJson.data.state).trim() : null;
-      if (stateRaw === 'SERVICE' || stateRaw === 'PREPARATION' || stateRaw === 'ERROR') {
-        out.reachable = false;
-        out.error = `ÖKC durumu uygun değil (state: ${out.state}).`;
-      } else {
-        out.reachable = true;
-      }
-      out.activeDocumentId = pickActiveDocumentId(stJson.data);
-      out.activeDocumentHasPayments = activeDocumentHasPaymentsFromStData(stJson.data);
+      out.reachable = true;
+      out.state = cls.data && cls.data.state != null ? String(cls.data.state).trim() : null;
+      out.activeDocumentId = pickActiveDocumentId(cls.data);
+      out.activeDocumentHasPayments = activeDocumentHasPaymentsFromStData(cls.data);
     }
   } catch (e) {
     out.reachable = false;
