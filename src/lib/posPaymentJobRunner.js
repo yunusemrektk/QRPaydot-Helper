@@ -44,6 +44,22 @@ function formatHuginErr(err) {
   return main || desc || 'POS error';
 }
 
+function parseEftTransactionId(paid) {
+  const raw = paid && paid.data && paid.data.transactionId;
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return Math.trunc(raw);
+  if (typeof raw === 'string' && raw.trim()) {
+    const n = Number(raw.trim());
+    if (Number.isFinite(n) && n > 0) return Math.trunc(n);
+  }
+  return undefined;
+}
+
+function buildJobSuccessPayload(recordedAmount, posEftTransactionId) {
+  const payload = { status: 'SUCCESS', recordedAmount };
+  if (posEftTransactionId != null) payload.posEftTransactionId = posEftTransactionId;
+  return payload;
+}
+
 function getLastDocumentsList(statusData) {
   let cur = statusData;
   for (let depth = 0; depth < 4 && cur && typeof cur === 'object' && !Array.isArray(cur); depth++) {
@@ -210,14 +226,12 @@ async function runPosPaymentJobFromWs(data) {
       if (!paid || paid.status !== 'SUCCESS') {
         if (isLikelyLostPosResponseError(paid && paid.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId))) {
           appendServiceLog(`[backend-ws] POS_PAYMENT_JOB recovered via lastDocuments jobId=${jobId}`);
-          await postJobComplete(cfg, merchantId, jobId, {
-            status: 'SUCCESS',
-            recordedAmount: itemsTotal,
-          });
+          await postJobComplete(cfg, merchantId, jobId, buildJobSuccessPayload(itemsTotal));
           return;
         }
         throw new Error(formatHuginErr(paid && paid.error) || 'POS payment failed');
       }
+      const eftTransactionId = parseEftTransactionId(paid);
       const bankAmount = parseHuginAmountTry(paid.data && paid.data.amount, itemsTotal);
       const diff = round2(itemsTotal - bankAmount);
 
@@ -266,21 +280,21 @@ async function runPosPaymentJobFromWs(data) {
           appendServiceLog(
             `[backend-ws] POS_PAYMENT_JOB recovered via lastDocuments (finalize) jobId=${jobId}`,
           );
-          await postJobComplete(cfg, merchantId, jobId, {
-            status: 'SUCCESS',
-            recordedAmount: itemsTotal,
-          });
+          await postJobComplete(
+            cfg,
+            merchantId,
+            jobId,
+            buildJobSuccessPayload(itemsTotal, eftTransactionId),
+          );
           return;
         }
         throw new Error(formatHuginErr(fin && fin.error) || 'POS finalize failed');
       }
 
-      await postJobComplete(cfg, merchantId, jobId, {
-        status: 'SUCCESS',
-        recordedAmount: itemsTotal,
-      });
+      await postJobComplete(cfg, merchantId, jobId, buildJobSuccessPayload(itemsTotal, eftTransactionId));
       appendServiceLog(
-        `[backend-ws] POS_PAYMENT_JOB ok jobId=${jobId} card itemsTotal=${itemsTotal} bankAmount=${bankAmount}`,
+        `[backend-ws] POS_PAYMENT_JOB ok jobId=${jobId} card itemsTotal=${itemsTotal} bankAmount=${bankAmount}` +
+          (eftTransactionId != null ? ` eftTxnId=${eftTransactionId}` : ''),
       );
       return;
     }
