@@ -5,6 +5,9 @@ const { PORT } = require('../config');
 const { getPosAssignment, getBackendConnection } = require('./printerStore');
 const { backendBearerForApi, hasBackendCallbackAuth } = require('./backendCallbackAuth');
 const { classifyHuginStatusJson, isLikelyLostPosResponseError } = require('./huginReachability');
+const { appendServiceLog } = require('./logger');
+const { parseEftPaymentMeta } = require('./parseEftPaymentMeta');
+const { registerFiscalPending } = require('./posBackendFiscalPending');
 
 let lastPosJobId = '';
 let lastPosJobAt = 0;
@@ -44,19 +47,12 @@ function formatHuginErr(err) {
   return main || desc || 'POS error';
 }
 
-function parseEftTransactionId(paid) {
-  const raw = paid && paid.data && paid.data.transactionId;
-  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return Math.trunc(raw);
-  if (typeof raw === 'string' && raw.trim()) {
-    const n = Number(raw.trim());
-    if (Number.isFinite(n) && n > 0) return Math.trunc(n);
-  }
-  return undefined;
-}
-
-function buildJobSuccessPayload(recordedAmount, posEftTransactionId) {
+function buildJobSuccessPayload(recordedAmount, eftMeta, fiscalDocumentId) {
   const payload = { status: 'SUCCESS', recordedAmount };
-  if (posEftTransactionId != null) payload.posEftTransactionId = posEftTransactionId;
+  if (fiscalDocumentId) payload.fiscalDocumentId = String(fiscalDocumentId).trim();
+  if (eftMeta && eftMeta.transactionId != null) payload.posEftTransactionId = eftMeta.transactionId;
+  if (eftMeta && eftMeta.acquirerId != null) payload.posAcquirerId = eftMeta.acquirerId;
+  if (eftMeta && eftMeta.bankReferenceNo) payload.posBankReferenceNo = eftMeta.bankReferenceNo;
   return payload;
 }
 
@@ -158,9 +154,11 @@ async function runPosPaymentJobFromWs(data) {
   const posMethod = String(data.posMethod || '').toLowerCase() === 'card' ? 'card' : 'cash';
   const amount = round2(Number(data.amount));
   const huginLines = Array.isArray(data.huginLines) ? data.huginLines : null;
+  const tableId = data.tableId != null ? String(data.tableId).trim() : '';
+  const sessionId = data.sessionId != null ? String(data.sessionId).trim() : null;
 
   if (!serialNo || !vkn) {
-    await postJobComplete(cfg, merchantId, jobId, { status: 'FAILED', errorMessage: 'missing_serial_or_vkn' });
+    await postJobCompleteWithRetry(cfg, merchantId, jobId, { status: 'FAILED', errorMessage: 'missing_serial_or_vkn' });
     return;
   }
 
@@ -174,7 +172,10 @@ async function runPosPaymentJobFromWs(data) {
   });
 
   try {
+    await patchJobPhase(cfg, merchantId, jobId, 'PROCESSING');
+
     // Terminal hazır mı (BillingModal assertHuginTerminalIdle)
+    await patchJobPhase(cfg, merchantId, jobId, 'CHECKING_TERMINAL');
     const stRes = await undiciFetch(`${localBase}/v1/pos/status?${qBase.toString()}`, { method: 'GET' });
     const stJson = await stRes.json().catch(() => null);
     const stCls = classifyHuginStatusJson(stJson);
@@ -196,6 +197,7 @@ async function runPosPaymentJobFromWs(data) {
       throw new Error('Geçersiz ödeme tutarı');
     }
 
+    await patchJobPhase(cfg, merchantId, jobId, 'OPENING_DOCUMENT');
     const ensureRes = await undiciFetch(`${localBase}/v1/pos/ensure-sale-document?${qBase.toString()}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -206,6 +208,28 @@ async function runPosPaymentJobFromWs(data) {
       throw new Error(formatHuginErr(ensured && ensured.error) || 'POS document start failed');
     }
     const documentId = String(ensured.data.documentId).trim();
+
+    if (tableId) {
+      const regBody = {
+        tableId,
+        sessionId: sessionId || null,
+        posDeviceId,
+        externalDocumentId: documentId,
+        amountTry: itemsTotal,
+        posMethod,
+        payloadJson: {
+          flow: 'pos_payment_job',
+          jobId,
+          paymentItems: Array.isArray(data.items) ? data.items : [],
+        },
+      };
+      const reg = await registerFiscalPending(merchantId, regBody);
+      if (!reg.ok) {
+        appendServiceLog(`[backend-ws] fiscal-pending register failed jobId=${jobId} err=${reg.error}`);
+      }
+    }
+
+    await patchJobPhase(cfg, merchantId, jobId, 'SENT_TO_POS', { fiscalDocumentId: documentId });
 
     if (posMethod === 'card') {
       const paidRes = await undiciFetch(
@@ -218,7 +242,7 @@ async function runPosPaymentJobFromWs(data) {
             installmentCount: 0,
             currencyCode: '949',
             UTID: 'default',
-            detailedResponse: false,
+            detailedResponse: true,
           }),
         },
       );
@@ -226,12 +250,18 @@ async function runPosPaymentJobFromWs(data) {
       if (!paid || paid.status !== 'SUCCESS') {
         if (isLikelyLostPosResponseError(paid && paid.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId))) {
           appendServiceLog(`[backend-ws] POS_PAYMENT_JOB recovered via lastDocuments jobId=${jobId}`);
-          await postJobComplete(cfg, merchantId, jobId, buildJobSuccessPayload(itemsTotal));
+          await postJobCompleteWithRetry(
+            cfg,
+            merchantId,
+            jobId,
+            buildJobSuccessPayload(itemsTotal, null, documentId),
+          );
           return;
         }
         throw new Error(formatHuginErr(paid && paid.error) || 'POS payment failed');
       }
-      const eftTransactionId = parseEftTransactionId(paid);
+      const eftMeta = parseEftPaymentMeta(paid);
+      const eftTransactionId = eftMeta.transactionId;
       const bankAmount = parseHuginAmountTry(paid.data && paid.data.amount, itemsTotal);
       const diff = round2(itemsTotal - bankAmount);
 
@@ -266,6 +296,7 @@ async function runPosPaymentJobFromWs(data) {
         totals: totalsBlock,
       });
 
+      await patchJobPhase(cfg, merchantId, jobId, 'WAITING_RESULT', { fiscalDocumentId: documentId });
       const finRes = await undiciFetch(
         `${localBase}/v1/pos/documents/${encodeURIComponent(documentId)}?${qBase.toString()}`,
         {
@@ -280,26 +311,54 @@ async function runPosPaymentJobFromWs(data) {
           appendServiceLog(
             `[backend-ws] POS_PAYMENT_JOB recovered via lastDocuments (finalize) jobId=${jobId}`,
           );
-          await postJobComplete(
+          await postJobCompleteWithRetry(
             cfg,
             merchantId,
             jobId,
-            buildJobSuccessPayload(itemsTotal, eftTransactionId),
+            buildJobSuccessPayload(itemsTotal, eftMeta, documentId),
           );
           return;
         }
-        throw new Error(formatHuginErr(fin && fin.error) || 'POS finalize failed');
+        // Kart çekildi; yalnızca fiş finalize başarısız — frontend cihazı sorgulamadan job sonucundan devam eder.
+        const finalizeErr = formatHuginErr(fin && fin.error) || 'POS finalize failed';
+        appendServiceLog(
+          `[backend-ws] POS_PAYMENT_JOB EFT_OK_FINALIZE_PENDING jobId=${jobId}: ${finalizeErr}`,
+        );
+        await postJobCompleteWithRetry(cfg, merchantId, jobId, {
+          status: 'EFT_OK_FINALIZE_PENDING',
+          errorMessage: finalizeErr.slice(0, 500),
+          recordedAmount: itemsTotal,
+          fiscalDocumentId: documentId,
+          posEftTransactionId: eftMeta.transactionId,
+          posAcquirerId: eftMeta.acquirerId,
+          posBankReferenceNo: eftMeta.bankReferenceNo,
+          resultPayload: {
+            finalizePending: true,
+            finalizeBody: finBody,
+            posEftTransactionId: eftMeta.transactionId,
+            posAcquirerId: eftMeta.acquirerId,
+            posBankReferenceNo: eftMeta.bankReferenceNo,
+          },
+        });
+        return;
       }
 
-      await postJobComplete(cfg, merchantId, jobId, buildJobSuccessPayload(itemsTotal, eftTransactionId));
+      await postJobCompleteWithRetry(
+        cfg,
+        merchantId,
+        jobId,
+        buildJobSuccessPayload(itemsTotal, eftMeta, documentId),
+      );
       appendServiceLog(
         `[backend-ws] POS_PAYMENT_JOB ok jobId=${jobId} card itemsTotal=${itemsTotal} bankAmount=${bankAmount}` +
-          (eftTransactionId != null ? ` eftTxnId=${eftTransactionId}` : ''),
+          (eftTransactionId != null ? ` eftTxnId=${eftTransactionId}` : '') +
+          (eftMeta.bankReferenceNo ? ` bankRef=${eftMeta.bankReferenceNo}` : ''),
       );
       return;
     }
 
     // cash
+    await patchJobPhase(cfg, merchantId, jobId, 'WAITING_RESULT', { fiscalDocumentId: documentId });
     const finBody = buildFinalizeBody({
       amountTry: itemsTotal,
       paymentType: 'CASH',
@@ -334,19 +393,29 @@ async function runPosPaymentJobFromWs(data) {
         appendServiceLog(
           `[backend-ws] POS_PAYMENT_JOB recovered via lastDocuments (cash finalize) jobId=${jobId}`,
         );
-        await postJobComplete(cfg, merchantId, jobId, { status: 'SUCCESS', recordedAmount: itemsTotal });
+        await postJobCompleteWithRetry(
+          cfg,
+          merchantId,
+          jobId,
+          buildJobSuccessPayload(itemsTotal, null, documentId),
+        );
         return;
       }
       throw new Error(formatHuginErr(fin && fin.error) || 'POS finalize failed');
     }
 
-    await postJobComplete(cfg, merchantId, jobId, { status: 'SUCCESS', recordedAmount: itemsTotal });
+    await postJobCompleteWithRetry(
+      cfg,
+      merchantId,
+      jobId,
+      buildJobSuccessPayload(itemsTotal, null, documentId),
+    );
     appendServiceLog(`[backend-ws] POS_PAYMENT_JOB ok jobId=${jobId} cash`);
   } catch (e) {
     const msg = e && e.message ? String(e.message) : String(e);
     appendServiceLog(`[backend-ws] POS_PAYMENT_JOB failed jobId=${jobId}: ${msg}`);
     console.error('[qrpaydot-helper] POS_PAYMENT_JOB', msg);
-    await postJobComplete(cfg, merchantId, jobId, { status: 'FAILED', errorMessage: msg.slice(0, 500) });
+    await postJobCompleteWithRetry(cfg, merchantId, jobId, { status: 'FAILED', errorMessage: msg.slice(0, 500) });
   }
 }
 
@@ -410,27 +479,67 @@ function buildFinalizeBody({ amountTry, paymentType, items, totals }) {
   return body;
 }
 
-async function postJobComplete(cfg, merchantId, jobId, payload) {
+async function patchJobPhase(cfg, merchantId, jobId, phase, extra = {}) {
   const api = String(cfg.apiBaseUrl || '')
     .trim()
     .replace(/\/+$/, '');
-  const url = `${api}/merchants/${encodeURIComponent(merchantId)}/pos-payment-jobs/${encodeURIComponent(jobId)}/complete`;
+  const url = `${api}/merchants/${encodeURIComponent(merchantId)}/pos-payment-jobs/${encodeURIComponent(jobId)}/phase`;
   try {
     const r = await undiciFetch(url, {
-      method: 'POST',
+      method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${backendBearerForApi(cfg)}`,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ phase, ...extra }),
     });
     if (!r.ok) {
       const t = await r.text().catch(() => '');
-      appendServiceLog(`[backend-ws] complete job HTTP ${r.status} ${t.slice(0, 200)}`);
+      appendServiceLog(`[backend-ws] phase PATCH HTTP ${r.status} ${t.slice(0, 120)}`);
     }
   } catch (e) {
-    appendServiceLog(`[backend-ws] complete job fetch failed: ${e.message || e}`);
+    appendServiceLog(`[backend-ws] phase PATCH failed: ${e.message || e}`);
   }
+}
+
+async function postJobCompleteWithRetry(cfg, merchantId, jobId, payload) {
+  const api = String(cfg.apiBaseUrl || '')
+    .trim()
+    .replace(/\/+$/, '');
+  const url = `${api}/merchants/${encodeURIComponent(merchantId)}/pos-payment-jobs/${encodeURIComponent(jobId)}/complete`;
+  const delays = [2000, 4000, 8000, 15000];
+
+  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+    try {
+      const r = await undiciFetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${backendBearerForApi(cfg)}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (r.ok) return true;
+      const t = await r.text().catch(() => '');
+      appendServiceLog(
+        `[backend-ws] complete job attempt ${attempt + 1} HTTP ${r.status} ${t.slice(0, 200)}`,
+      );
+    } catch (e) {
+      appendServiceLog(`[backend-ws] complete job attempt ${attempt + 1} fetch failed: ${e.message || e}`);
+    }
+    if (attempt < delays.length) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, delays[attempt]);
+      });
+    }
+  }
+
+  appendServiceLog(`[backend-ws] complete job all retries exhausted jobId=${jobId}`);
+  return false;
+}
+
+async function postJobComplete(cfg, merchantId, jobId, payload) {
+  return postJobCompleteWithRetry(cfg, merchantId, jobId, payload);
 }
 
 module.exports = { runPosPaymentJobFromWs, buildFinalizeBody };
