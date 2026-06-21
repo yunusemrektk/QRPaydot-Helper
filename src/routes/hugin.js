@@ -142,7 +142,10 @@ function summarizeHuginJson(json) {
   return title ? `${st} (${title})` : st;
 }
 
-async function huginFetch(posDeviceId, path, init, headersExtra) {
+/** Hugin PC Link tek istek kabul eder — cihaz başına HTTP sırası. */
+const huginFetchTailByPosId = new Map();
+
+async function huginFetchInner(posDeviceId, path, init, headersExtra) {
   const ep = getPosAssignment(posDeviceId);
   if (!ep || !ep.host || !(Number(ep.port) > 0)) {
     appendServiceLog(`[hugin-proxy] blocked pos=${posDeviceId} reason=POS_NOT_ASSIGNED`);
@@ -205,6 +208,23 @@ async function huginFetch(posDeviceId, path, init, headersExtra) {
     appendServiceLog(`[hugin-proxy] ${method} ${relPath} pos=${posDeviceId} -> FETCH_ERR ${msg}`);
     throw err;
   }
+}
+
+async function huginFetch(posDeviceId, path, init, headersExtra) {
+  const key = String(posDeviceId || '').trim();
+  if (!key) return huginFetchInner(posDeviceId, path, init, headersExtra);
+
+  const prev = huginFetchTailByPosId.get(key) ?? Promise.resolve();
+  const next = prev
+    .catch(() => undefined)
+    .then(() => huginFetchInner(key, path, init, headersExtra))
+    .finally(() => {
+      if (huginFetchTailByPosId.get(key) === next) {
+        huginFetchTailByPosId.delete(key);
+      }
+    });
+  huginFetchTailByPosId.set(key, next);
+  return next;
 }
 
 function parseActiveDocumentId(payload) {
