@@ -285,7 +285,18 @@ router.get('/settings', async (req, res) => {
       { method: 'GET' },
       { 'X-SoftwareId': softwareId, 'X-SerialNo': serialNo },
     );
-    return res.status(r.httpStatus).json(r.json || { status: 'ERROR', error: { title: 'Invalid response' } });
+    const json = r.json || { status: 'ERROR', error: { title: 'Invalid response' } };
+    if (json.status === 'SUCCESS') {
+      const { getBackendConnection } = require('../lib/printerStore');
+      const { maybeRefreshDepartmentsFromSettingsResponse } = require('../lib/posDepartmentsSync');
+      void maybeRefreshDepartmentsFromSettingsResponse(
+        getBackendConnection(),
+        posDeviceId,
+        json,
+        'get-settings',
+      );
+    }
+    return res.status(r.httpStatus).json(json);
   } catch (e) {
     if (e && e.code === 'POS_NOT_ASSIGNED') {
       return res.status(400).json({ status: 'ERROR', error: { title: 'POS bu PC’de atanmadı' } });
@@ -309,7 +320,17 @@ router.patch('/settings', async (req, res) => {
       { method: 'PATCH', body: req.body || {} },
       { 'X-SoftwareId': softwareId, 'X-SerialNo': serialNo },
     );
-    return res.status(r.httpStatus).json(r.json || { status: 'ERROR', error: { title: 'Invalid response' } });
+    const json = r.json || { status: 'ERROR', error: { title: 'Invalid response' } };
+    if (json.status === 'SUCCESS' && Array.isArray(json.data && json.data.departments)) {
+      const { getBackendConnection } = require('../lib/printerStore');
+      const { persistDepartmentsSnapshot, normalizeDepartments } = require('../lib/posDepartmentsSync');
+      const cfg = getBackendConnection();
+      const depts = normalizeDepartments(json.data.departments);
+      if (depts.length && cfg && cfg.merchantId) {
+        void persistDepartmentsSnapshot(cfg, cfg.merchantId, posDeviceId, depts, 'patch-settings');
+      }
+    }
+    return res.status(r.httpStatus).json(json);
   } catch (e) {
     if (e && e.code === 'POS_NOT_ASSIGNED') {
       return res.status(400).json({ status: 'ERROR', error: { title: 'POS bu PC’de atanmadı' } });

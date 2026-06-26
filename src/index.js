@@ -20,6 +20,7 @@ const { createApp } = require('./app');
 const { runScan } = require('./routes/scan');
 const { getBackendConnection, ensurePrintDefaults, migratePackagedBackendApiBaseIfStale } = require('./lib/printerStore');
 const { startBackendWs } = require('./lib/backendWsClient');
+const { schedulePosDepartmentsSync } = require('./lib/posDepartmentsSync');
 
 appendServiceLogEarly(`boot isPkgExe=${isPkgExe} argv=${JSON.stringify(process.argv)}`);
 try {
@@ -125,6 +126,7 @@ const server = app.listen(PORT, BIND, () => {
       );
     }
     startBackendWs(saved);
+    schedulePosDepartmentsSync();
   } else {
     appendServiceLog(
       '[boot] Backend kimliği yok — sunucuya WebSocket bağlanmadı (uzaktan fiş/POS işi gelmez). Aynı PC’den işletme paneli → Ayarlar > Yazdırma ile oturumu Helper’a yazın.',

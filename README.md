@@ -85,10 +85,20 @@ Tarayıcı sekmesi yerine küçük bir uygulama penceresi isteyenler (geliştirm
 ```bash
 npm install
 npm run panel:build
-npm run desktop
+npm run desktop        # prod/default .env
+npm run desktop:dev    # .env.local ile LAN API (aşağıya bakın)
 ```
 
 Bu komut köprü sunucusunu başlatır ve paneli **Electron** penceresinde açar. Başlangıçta işletme paneli otomatik olarak harici tarayıcıda açılmaz; **Durum** sayfasındaki **İşletme panelini aç** ile açarsınız.
+
+**LAN test ortamı:** `print-bridge/.env.local` oluşturun (`.env.example` şablonuna bakın). Örnek:
+
+```
+VITE_PRINT_BRIDGE_API_BASE_URL=http://192.168.1.3:3001/api
+HELPER_MERCHANT_DASH_FROM_VITE=1
+```
+
+Ardından `npm run desktop:dev` — `.env` dosyasını elle değiştirmenize gerek kalmaz.
 
 `npm run build:win` / `build:installer` çalıştırmadan önce **`npm run panel:build`** otomatik tetiklenir (`public/panel/` pakete dahildir).
 
@@ -99,7 +109,7 @@ Helper, **electron-updater** ile GitHub Releases üzerinden otomatik güncelleme
 ### Ön hazırlık (bir kez)
 
 1. GitHub'da **Classic Personal Access Token** oluşturun (scope: `repo`).
-2. `print-bridge/.env` dosyasına ekleyin:
+2. `.env.example` dosyasını `.env` olarak kopyalayın ve `GH_TOKEN` değerini girin:
    ```
    GH_TOKEN=ghp_xxxxxxxxxxxxx
    ```
@@ -107,11 +117,20 @@ Helper, **electron-updater** ile GitHub Releases üzerinden otomatik güncelleme
 ### Yeni sürüm yayınlama
 
 ```bash
-# 1. package.json'da version'ı artırın (ör. 1.0.3 → 1.0.4)
+npm run release:patch   # patch sürüm + publish (ör. 1.1.3 → 1.1.4)
+# veya
+npm run release:minor   # minor sürüm + publish
+```
 
-# 2. Publish komutunu çalıştırın
+`release:patch` / `release:minor` sırasıyla `npm version` ile semver artırır (commit + git tag), ardından `publish:win` çalıştırır. Yayın öncesi `.env` içindeki API URL'sini prod'a çevirmenize **gerek yok** — `publish:win` sırasında `scripts/write-embed-backend-api.cjs` prod profiliyle çalışır; LAN/localhost URL'leri yok sayılır ve Setup.exe'ye varsayılan olarak `https://api.qrpaydot.com/api` gömülür (veya `PRINT_BRIDGE_PROD_API_BASE_URL` ile belirttiğiniz adres).
+
+Yalnızca publish (versiyon zaten artırılmışsa):
+
+```bash
 npm run publish:win
 ```
+
+`release:*` komutlarından önce working tree temiz olmalıdır (`npm version` commit oluşturur). Publish başarısız olursa oluşan git tag'ini manuel silmeniz gerekebilir.
 
 Bu tek komut sırasıyla:
 - Panel'i build eder
@@ -156,7 +175,7 @@ https://github.com/yunusemrektk/QRPaydot-Helper/releases/latest/download/QRPaydo
 
 ## Ortam değişkenleri
 
-Helper, **merchant-dash ile aynı** kök `.env` dosyasını okur (`merchant-dash/.env`), ardından varsa `print-bridge/.env` ile üzerine yazar. (`src/loadEnv.js`, `dotenv`)
+Helper ortam dosyalarını şu sırayla okur (`src/loadEnv.js`): `merchant-dash/.env` → `print-bridge/.env` → `print-bridge/.env.local` (en yüksek öncelik, gitignore). Şablon: `.env.example`.
 
 **İşletme paneli URL’si** (`/health` içindeki `merchantDash`, “İşletme panelini aç”):
 

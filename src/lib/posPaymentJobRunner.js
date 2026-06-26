@@ -8,6 +8,7 @@ const { classifyHuginStatusJson, isLikelyLostPosResponseError } = require('./hug
 const { appendServiceLog } = require('./logger');
 const { parseEftPaymentMeta } = require('./parseEftPaymentMeta');
 const { registerFiscalPending } = require('./posBackendFiscalPending');
+const { ensureDepartmentsForJob } = require('./posDepartmentsSync');
 
 let lastPosJobId = '';
 let lastPosJobAt = 0;
@@ -27,6 +28,53 @@ function toFixed2(n) {
 
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
+}
+
+/** GİB / PC Link geçerli KDV oranları; fallback departman seçim önceliği. */
+const HUGIN_FISCAL_VAT_RATES = [0, 1, 10, 20];
+
+function pickFallbackDepartment(departments) {
+  for (const rate of HUGIN_FISCAL_VAT_RATES) {
+    const m = departments.find((d) => Number(d.vatRate) === rate);
+    if (m) return m;
+  }
+  return departments[0] || null;
+}
+
+/**
+ * Satır KDV oranı + departmentId'sini cihaz departmanlarıyla tutarlı yap (PC ile aynı mantık):
+ *  1) Satırın departmentId'si cihazda varsa → o departmanın vatRate'i.
+ *  2) Yoksa vatRate'i eşleşen departman → onun id + vatRate'i.
+ *  3) Hiçbiri yoksa → geçerli KDV oranlı ilk (fallback) departman.
+ * Tutar (amount/unitPrice/quantity) değişmez.
+ */
+function remapHuginLinesToDeviceDepartments(lines, departments) {
+  if (!Array.isArray(lines) || lines.length === 0) return lines;
+  if (!Array.isArray(departments) || departments.length === 0) return lines;
+
+  const deptById = new Map(departments.map((d) => [Number(d.id), d]));
+  const deptByVat = new Map();
+  for (const d of departments) {
+    const v = Number(d.vatRate);
+    if (!deptByVat.has(v)) deptByVat.set(v, d);
+  }
+  const fallback = pickFallbackDepartment(departments);
+
+  return lines.map((l) => {
+    const lineDeptId = l.departmentId != null ? Number(l.departmentId) : null;
+    const lineVat = l.vatRate != null && Number.isFinite(Number(l.vatRate)) ? Number(l.vatRate) : null;
+
+    let dept = null;
+    if (lineDeptId != null && deptById.has(lineDeptId)) {
+      dept = deptById.get(lineDeptId);
+    } else if (lineVat != null && deptByVat.has(lineVat)) {
+      dept = deptByVat.get(lineVat);
+    } else {
+      dept = fallback;
+    }
+    if (!dept) return l;
+    return { ...l, vatRate: Number(dept.vatRate), departmentId: dept.id };
+  });
 }
 
 function parseHuginAmountTry(raw, fallback) {
@@ -153,7 +201,7 @@ async function runPosPaymentJobFromWs(data) {
   const softwareId = padSoftwareId10(vkn);
   const posMethod = String(data.posMethod || '').toLowerCase() === 'card' ? 'card' : 'cash';
   const amount = round2(Number(data.amount));
-  const huginLines = Array.isArray(data.huginLines) ? data.huginLines : null;
+  let huginLines = Array.isArray(data.huginLines) ? data.huginLines : null;
   const tableId = data.tableId != null ? String(data.tableId).trim() : '';
   const sessionId = data.sessionId != null ? String(data.sessionId).trim() : null;
 
@@ -172,12 +220,25 @@ async function runPosPaymentJobFromWs(data) {
   });
 
   try {
-    await patchJobPhase(cfg, merchantId, jobId, 'PROCESSING');
+    patchJobPhase(cfg, merchantId, jobId, 'PROCESSING');
+    patchJobPhase(cfg, merchantId, jobId, 'CHECKING_TERMINAL');
 
-    // Terminal hazır mı (BillingModal assertHuginTerminalIdle)
-    await patchJobPhase(cfg, merchantId, jobId, 'CHECKING_TERMINAL');
-    const stRes = await undiciFetch(`${localBase}/v1/pos/status?${qBase.toString()}`, { method: 'GET' });
-    const stJson = await stRes.json().catch(() => null);
+    const statusPromise = undiciFetch(`${localBase}/v1/pos/status?${qBase.toString()}`, { method: 'GET' }).then((r) =>
+      r.json().catch(() => null),
+    );
+    const departmentsPromise =
+      huginLines && huginLines.length
+        ? ensureDepartmentsForJob(
+            cfg,
+            merchantId,
+            posDeviceId,
+            { serialNo, vkn },
+            { skipDeviceFetch: true },
+          )
+        : Promise.resolve([]);
+
+    const [stJson, departments] = await Promise.all([statusPromise, departmentsPromise]);
+
     const stCls = classifyHuginStatusJson(stJson);
     if (stCls.kind === 'unreachable') {
       throw new Error(stCls.message || 'POS status unreachable');
@@ -190,6 +251,14 @@ async function runPosPaymentJobFromWs(data) {
       throw new Error(`ÖKC durumu uygun değil (state: ${stCls.data.state}).`);
     }
 
+    if (huginLines && huginLines.length) {
+      if (departments.length) {
+        huginLines = remapHuginLinesToDeviceDepartments(huginLines, departments);
+      } else {
+        appendServiceLog(`[backend-ws] POS_PAYMENT_JOB device departments empty jobId=${jobId} (KDV remap atlandı)`);
+      }
+    }
+
     const itemsTotal = huginLines && huginLines.length
       ? round2(huginLines.reduce((s, l) => s + round2(Number(l.amount) || 0), 0))
       : amount;
@@ -197,7 +266,7 @@ async function runPosPaymentJobFromWs(data) {
       throw new Error('Geçersiz ödeme tutarı');
     }
 
-    await patchJobPhase(cfg, merchantId, jobId, 'OPENING_DOCUMENT');
+    patchJobPhase(cfg, merchantId, jobId, 'OPENING_DOCUMENT');
     const ensureRes = await undiciFetch(`${localBase}/v1/pos/ensure-sale-document?${qBase.toString()}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -223,13 +292,14 @@ async function runPosPaymentJobFromWs(data) {
           paymentItems: Array.isArray(data.items) ? data.items : [],
         },
       };
-      const reg = await registerFiscalPending(merchantId, regBody);
-      if (!reg.ok) {
-        appendServiceLog(`[backend-ws] fiscal-pending register failed jobId=${jobId} err=${reg.error}`);
-      }
+      void registerFiscalPending(merchantId, regBody).then((reg) => {
+        if (!reg.ok) {
+          appendServiceLog(`[backend-ws] fiscal-pending register failed jobId=${jobId} err=${reg.error}`);
+        }
+      });
     }
 
-    await patchJobPhase(cfg, merchantId, jobId, 'SENT_TO_POS', { fiscalDocumentId: documentId });
+    patchJobPhase(cfg, merchantId, jobId, 'SENT_TO_POS', { fiscalDocumentId: documentId });
 
     if (posMethod === 'card') {
       const paidRes = await undiciFetch(
@@ -296,7 +366,7 @@ async function runPosPaymentJobFromWs(data) {
         totals: totalsBlock,
       });
 
-      await patchJobPhase(cfg, merchantId, jobId, 'WAITING_RESULT', { fiscalDocumentId: documentId });
+      patchJobPhase(cfg, merchantId, jobId, 'WAITING_RESULT', { fiscalDocumentId: documentId });
       const finRes = await undiciFetch(
         `${localBase}/v1/pos/documents/${encodeURIComponent(documentId)}?${qBase.toString()}`,
         {
@@ -358,7 +428,7 @@ async function runPosPaymentJobFromWs(data) {
     }
 
     // cash
-    await patchJobPhase(cfg, merchantId, jobId, 'WAITING_RESULT', { fiscalDocumentId: documentId });
+    patchJobPhase(cfg, merchantId, jobId, 'WAITING_RESULT', { fiscalDocumentId: documentId });
     const finBody = buildFinalizeBody({
       amountTry: itemsTotal,
       paymentType: 'CASH',
@@ -479,27 +549,29 @@ function buildFinalizeBody({ amountTry, paymentType, items, totals }) {
   return body;
 }
 
-async function patchJobPhase(cfg, merchantId, jobId, phase, extra = {}) {
+/** Panel ilerleme göstergesi — ödeme kritik yolunu bekletmez. */
+function patchJobPhase(cfg, merchantId, jobId, phase, extra = {}) {
   const api = String(cfg.apiBaseUrl || '')
     .trim()
     .replace(/\/+$/, '');
   const url = `${api}/merchants/${encodeURIComponent(merchantId)}/pos-payment-jobs/${encodeURIComponent(jobId)}/phase`;
-  try {
-    const r = await undiciFetch(url, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${backendBearerForApi(cfg)}`,
-      },
-      body: JSON.stringify({ phase, ...extra }),
+  void undiciFetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${backendBearerForApi(cfg)}`,
+    },
+    body: JSON.stringify({ phase, ...extra }),
+  })
+    .then(async (r) => {
+      if (!r.ok) {
+        const t = await r.text().catch(() => '');
+        appendServiceLog(`[backend-ws] phase PATCH HTTP ${r.status} ${t.slice(0, 120)}`);
+      }
+    })
+    .catch((e) => {
+      appendServiceLog(`[backend-ws] phase PATCH failed: ${e.message || e}`);
     });
-    if (!r.ok) {
-      const t = await r.text().catch(() => '');
-      appendServiceLog(`[backend-ws] phase PATCH HTTP ${r.status} ${t.slice(0, 120)}`);
-    }
-  } catch (e) {
-    appendServiceLog(`[backend-ws] phase PATCH failed: ${e.message || e}`);
-  }
 }
 
 async function postJobCompleteWithRetry(cfg, merchantId, jobId, payload) {

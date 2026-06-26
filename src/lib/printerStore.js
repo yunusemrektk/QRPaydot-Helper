@@ -14,6 +14,7 @@ function emptyStore() {
     discovered: [],
     assignments: {},
     posAssignments: {},
+    posDepartmentCache: {},
     backendConnection: null,
     printDefaults: { encoding: 'ascii' },
   };
@@ -36,6 +37,10 @@ function loadStore() {
       assignments: data.assignments && typeof data.assignments === 'object' ? data.assignments : {},
       posAssignments:
         data.posAssignments && typeof data.posAssignments === 'object' ? data.posAssignments : {},
+      posDepartmentCache:
+        data.posDepartmentCache && typeof data.posDepartmentCache === 'object'
+          ? data.posDepartmentCache
+          : {},
       backendConnection:
         data.backendConnection && typeof data.backendConnection === 'object'
           ? {
@@ -147,6 +152,31 @@ function removePosAssignment(posDeviceId) {
 
 function getAllPosAssignments() {
   return loadStore().posAssignments;
+}
+
+function getPosDepartmentCache(posDeviceId) {
+  if (!posDeviceId) return null;
+  const entry = loadStore().posDepartmentCache[String(posDeviceId)];
+  if (!entry || !Array.isArray(entry.departments) || entry.departments.length === 0) return null;
+  return entry.departments
+    .filter((d) => d && d.id != null && Number.isFinite(Number(d.id)))
+    .map((d) => ({
+      id: Number(d.id),
+      vatRate: d.vatRate != null && Number.isFinite(Number(d.vatRate)) ? Number(d.vatRate) : 0,
+    }));
+}
+
+function setPosDepartmentCache(posDeviceId, departments) {
+  if (!posDeviceId || !Array.isArray(departments) || departments.length === 0) return;
+  const store = loadStore();
+  store.posDepartmentCache[String(posDeviceId)] = {
+    savedAt: new Date().toISOString(),
+    departments: departments.map((d) => ({
+      id: Number(d.id),
+      vatRate: d.vatRate != null && Number.isFinite(Number(d.vatRate)) ? Number(d.vatRate) : 0,
+    })),
+  };
+  saveStore(store);
 }
 
 function getBackendConnection() {
@@ -284,6 +314,8 @@ module.exports = {
   setPosAssignment,
   removePosAssignment,
   getAllPosAssignments,
+  getPosDepartmentCache,
+  setPosDepartmentCache,
   getBackendConnection,
   setBackendConnection,
   getPrintDefaults,
