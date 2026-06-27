@@ -6,6 +6,7 @@ const {
   getAllPosAssignments,
   getBackendConnection,
   getPosDepartmentCache,
+  getPosDepartmentCacheEntry,
   setPosDepartmentCache,
 } = require('./printerStore');
 const { backendBearerForApi, hasBackendCallbackAuth } = require('./backendCallbackAuth');
@@ -28,6 +29,25 @@ function normalizeDepartments(raw) {
       id: Number(d.id),
       vatRate: d.vatRate != null && Number.isFinite(Number(d.vatRate)) ? Number(d.vatRate) : 0,
     }));
+}
+
+function departmentsSnapshotEqual(a, b) {
+  const left = normalizeDepartments(a);
+  const right = normalizeDepartments(b);
+  if (left.length !== right.length) return false;
+  const sorted = (rows) => [...rows].sort((x, y) => x.id - y.id);
+  const ls = sorted(left);
+  const rs = sorted(right);
+  for (let i = 0; i < ls.length; i++) {
+    if (ls[i].id !== rs[i].id || ls[i].vatRate !== rs[i].vatRate) return false;
+  }
+  return true;
+}
+
+function parseSavedAtMs(raw) {
+  if (!raw) return 0;
+  const ms = new Date(raw).getTime();
+  return Number.isFinite(ms) ? ms : 0;
 }
 
 function normalizePosState(stJson) {
@@ -76,11 +96,6 @@ async function postDepartmentsToBackend(cfg, merchantId, posDeviceId, department
   return r.ok;
 }
 
-function isDepartmentCacheEmpty(posDeviceId) {
-  const cached = getPosDepartmentCache(posDeviceId);
-  return !cached || cached.length === 0;
-}
-
 /** Yerel cache (+ mümkünse backend) güncelle. */
 async function persistDepartmentsSnapshot(cfg, merchantId, posDeviceId, departmentsRaw, logTag) {
   const departments = normalizeDepartments(departmentsRaw);
@@ -107,14 +122,21 @@ async function persistDepartmentsSnapshot(cfg, merchantId, posDeviceId, departme
 }
 
 /**
- * GET/PATCH settings yanıtı: yerel cache boşsa snapshot yaz (her status sorgusunda değil).
+ * GET settings yanıtı: cache boşsa veya cihaz departmanları değiştiyse snapshot yaz.
  */
 async function maybeRefreshDepartmentsFromSettingsResponse(cfg, posDeviceId, settingsJson, logTag) {
   if (!settingsJson || settingsJson.status !== 'SUCCESS') return false;
-  if (!isDepartmentCacheEmpty(posDeviceId)) return false;
   const merchantId = cfg && cfg.merchantId ? String(cfg.merchantId).trim() : '';
   if (!merchantId) return false;
   const depts = settingsJson.data && settingsJson.data.departments;
+  const incoming = normalizeDepartments(depts);
+  if (!incoming.length) return false;
+
+  const cached = getPosDepartmentCacheEntry(posDeviceId);
+  if (cached && departmentsSnapshotEqual(cached.departments, incoming)) {
+    return false;
+  }
+
   return persistDepartmentsSnapshot(cfg, merchantId, posDeviceId, depts, logTag || 'settings-response');
 }
 
@@ -144,7 +166,11 @@ async function fetchDepartmentsFromBackend(cfg, merchantId, posDeviceId) {
   if (!r.ok) return null;
   const j = await r.json().catch(() => null);
   const depts = normalizeDepartments(j && j.departments);
-  return depts.length ? depts : null;
+  if (!depts.length) return null;
+  return {
+    departments: depts,
+    savedAt: j && j.savedAt != null ? String(j.savedAt) : null,
+  };
 }
 
 /**
@@ -205,20 +231,35 @@ async function syncAllAssignedDevices() {
 async function ensureDepartmentsForJob(cfg, merchantId, posDeviceId, deviceMeta, opts = {}) {
   const skipDeviceFetch = Boolean(opts && opts.skipDeviceFetch);
 
-  const cached = getPosDepartmentCache(posDeviceId);
-  if (cached && cached.length) return cached;
-
   if (cfg && merchantId) {
     try {
       const fromBackend = await fetchDepartmentsFromBackend(cfg, merchantId, posDeviceId);
-      if (fromBackend && fromBackend.length) {
-        setPosDepartmentCache(posDeviceId, fromBackend);
-        return fromBackend;
+      if (fromBackend && fromBackend.departments.length) {
+        const cached = getPosDepartmentCacheEntry(posDeviceId);
+        const backendMs = parseSavedAtMs(fromBackend.savedAt);
+        const cacheMs = parseSavedAtMs(cached && cached.savedAt);
+        const differs =
+          !cached || !departmentsSnapshotEqual(cached.departments, fromBackend.departments);
+        if (differs || backendMs > cacheMs) {
+          setPosDepartmentCache(posDeviceId, fromBackend.departments);
+          if (differs) {
+            appendServiceLog(
+              `[pos-depts-sync] job backend refresh ${fromBackend.departments.length} dept(s) posDeviceId=${posDeviceId}`,
+            );
+          }
+          return fromBackend.departments;
+        }
+        return cached.departments;
       }
-    } catch {
-      /* ignore */
+    } catch (e) {
+      appendServiceLog(
+        `[pos-depts-sync] job backend fetch fail posDeviceId=${posDeviceId}: ${e.message || e}`,
+      );
     }
   }
+
+  const cached = getPosDepartmentCache(posDeviceId);
+  if (cached && cached.length) return cached;
 
   if (skipDeviceFetch) {
     return [];
@@ -272,6 +313,7 @@ module.exports = {
   resolveDepartmentsForJob,
   schedulePosDepartmentsSync,
   normalizeDepartments,
+  departmentsSnapshotEqual,
   postDepartmentsToBackend,
   maybeRefreshDepartmentsFromSettingsResponse,
   persistDepartmentsSnapshot,

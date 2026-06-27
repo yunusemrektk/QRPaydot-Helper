@@ -155,15 +155,26 @@ function getAllPosAssignments() {
 }
 
 function getPosDepartmentCache(posDeviceId) {
+  const entry = getPosDepartmentCacheEntry(posDeviceId);
+  if (!entry || !entry.departments.length) return null;
+  return entry.departments;
+}
+
+function getPosDepartmentCacheEntry(posDeviceId) {
   if (!posDeviceId) return null;
   const entry = loadStore().posDepartmentCache[String(posDeviceId)];
   if (!entry || !Array.isArray(entry.departments) || entry.departments.length === 0) return null;
-  return entry.departments
+  const departments = entry.departments
     .filter((d) => d && d.id != null && Number.isFinite(Number(d.id)))
     .map((d) => ({
       id: Number(d.id),
       vatRate: d.vatRate != null && Number.isFinite(Number(d.vatRate)) ? Number(d.vatRate) : 0,
     }));
+  if (!departments.length) return null;
+  return {
+    savedAt: entry.savedAt != null ? String(entry.savedAt) : null,
+    departments,
+  };
 }
 
 function setPosDepartmentCache(posDeviceId, departments) {
@@ -315,6 +326,7 @@ module.exports = {
   removePosAssignment,
   getAllPosAssignments,
   getPosDepartmentCache,
+  getPosDepartmentCacheEntry,
   setPosDepartmentCache,
   getBackendConnection,
   setBackendConnection,
