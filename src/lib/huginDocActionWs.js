@@ -112,6 +112,9 @@ async function handlePosHuginDocAction(wsMsgData) {
           paymentType,
           items: Array.isArray(data.items) ? data.items : undefined,
           totals: data.totals && typeof data.totals === 'object' ? data.totals : undefined,
+          saleType: data.saleType,
+          customer: data.customer,
+          invoiceId: data.invoiceId,
         });
         const docRes = await undiciFetch(
           `${localBase}/v1/pos/documents/${encodeURIComponent(documentId)}?${qs.toString()}`,

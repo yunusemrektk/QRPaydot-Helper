@@ -9,6 +9,12 @@ const { appendServiceLog } = require('./logger');
 const { parseEftPaymentMeta } = require('./parseEftPaymentMeta');
 const { registerFiscalPending } = require('./posBackendFiscalPending');
 const { ensureDepartmentsForJob } = require('./posDepartmentsSync');
+const {
+  sanitizeCustomer,
+  resolveSaleType,
+  findSuccessfulFiscalDocumentInLastDocuments,
+  extractFiscalDocMetaFromHuginResponse,
+} = require('./fiscalFinalize');
 
 let lastPosJobId = '';
 let lastPosJobAt = 0;
@@ -95,62 +101,24 @@ function formatHuginErr(err) {
   return main || desc || 'POS error';
 }
 
-function buildJobSuccessPayload(recordedAmount, eftMeta, fiscalDocumentId) {
+function buildJobSuccessPayload(recordedAmount, eftMeta, fiscalDocumentId, fiscalDocMeta) {
   const payload = { status: 'SUCCESS', recordedAmount };
   if (fiscalDocumentId) payload.fiscalDocumentId = String(fiscalDocumentId).trim();
   if (eftMeta && eftMeta.transactionId != null) payload.posEftTransactionId = eftMeta.transactionId;
   if (eftMeta && eftMeta.acquirerId != null) payload.posAcquirerId = eftMeta.acquirerId;
   if (eftMeta && eftMeta.bankReferenceNo) payload.posBankReferenceNo = eftMeta.bankReferenceNo;
+  if (fiscalDocMeta && typeof fiscalDocMeta === 'object') {
+    const resultPayload = {};
+    if (fiscalDocMeta.invoiceId) resultPayload.invoiceId = fiscalDocMeta.invoiceId;
+    if (fiscalDocMeta.receiptNo) resultPayload.receiptNo = fiscalDocMeta.receiptNo;
+    if (fiscalDocMeta.eDocumentNo) resultPayload.eDocumentNo = fiscalDocMeta.eDocumentNo;
+    if (Object.keys(resultPayload).length > 0) payload.resultPayload = resultPayload;
+  }
   return payload;
 }
 
-function getLastDocumentsList(statusData) {
-  let cur = statusData;
-  for (let depth = 0; depth < 4 && cur && typeof cur === 'object' && !Array.isArray(cur); depth++) {
-    const ld = cur.lastDocuments ?? cur.LastDocuments;
-    if (Array.isArray(ld)) return ld;
-    const inner = cur.data;
-    if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
-      cur = inner;
-      continue;
-    }
-    break;
-  }
-  return [];
-}
 
-function normDocId(raw) {
-  return String(raw ?? '')
-    .trim()
-    .toLowerCase();
-}
-
-/** EFT/finalize yanıtı gelmezse POS fişi yine de SUCCESS olmuş olabilir. */
-function findSuccessfulReceiptInLastDocuments(statusData, documentId) {
-  const want = normDocId(documentId);
-  if (!want) return false;
-  for (const entry of getLastDocumentsList(statusData)) {
-    if (!entry || typeof entry !== 'object') continue;
-    const id = normDocId(entry.documentId ?? entry.DocumentId);
-    if (id !== want) continue;
-    const st = String(entry.documentStatus ?? entry.DocumentStatus ?? '')
-      .trim()
-      .toUpperCase();
-    if (st !== 'SUCCESS') continue;
-    const docCat = String(entry.docCategory ?? entry.DocCategory ?? '')
-      .trim()
-      .toUpperCase();
-    const saleType = String(entry.saleType ?? entry.SaleType ?? '')
-      .trim()
-      .toUpperCase();
-    if (docCat && docCat !== 'SALE') continue;
-    if (saleType && saleType !== 'RECEIPT') continue;
-    return true;
-  }
-  return false;
-}
-
-async function pollDocumentSuccessOnDevice(localBase, qBase, documentId) {
+async function pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType) {
   const attempts = 3;
   const delayMs = 650;
   for (let i = 0; i < attempts; i++) {
@@ -160,7 +128,7 @@ async function pollDocumentSuccessOnDevice(localBase, qBase, documentId) {
     const cls = classifyHuginStatusJson(stJson);
     if (cls.kind === 'reachable_issue') return false;
     if (cls.kind === 'unreachable') continue;
-    if (findSuccessfulReceiptInLastDocuments(cls.data, documentId)) return true;
+    if (findSuccessfulFiscalDocumentInLastDocuments(cls.data, documentId, expectedSaleType)) return true;
   }
   return false;
 }
@@ -204,6 +172,14 @@ async function runPosPaymentJobFromWs(data) {
   let huginLines = Array.isArray(data.huginLines) ? data.huginLines : null;
   const tableId = data.tableId != null ? String(data.tableId).trim() : '';
   const sessionId = data.sessionId != null ? String(data.sessionId).trim() : null;
+  const saleType = resolveSaleType(data.saleType);
+  const customer = sanitizeCustomer(data.customer);
+  const invoiceId = data.invoiceId != null ? String(data.invoiceId).trim() : '';
+  const expectedSaleType = saleType !== 'RECEIPT' ? saleType : undefined;
+  const finalizeExtras =
+    saleType !== 'RECEIPT' && customer
+      ? { saleType, customer, ...(invoiceId ? { invoiceId } : {}) }
+      : {};
 
   if (!serialNo || !vkn) {
     await postJobCompleteWithRetry(cfg, merchantId, jobId, { status: 'FAILED', errorMessage: 'missing_serial_or_vkn' });
@@ -318,7 +294,7 @@ async function runPosPaymentJobFromWs(data) {
       );
       const paid = await paidRes.json().catch(() => null);
       if (!paid || paid.status !== 'SUCCESS') {
-        if (isLikelyLostPosResponseError(paid && paid.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId))) {
+        if (isLikelyLostPosResponseError(paid && paid.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType))) {
           appendServiceLog(`[backend-ws] POS_PAYMENT_JOB recovered via lastDocuments jobId=${jobId}`);
           await postJobCompleteWithRetry(
             cfg,
@@ -364,6 +340,7 @@ async function runPosPaymentJobFromWs(data) {
         paymentType: 'EFT_POS',
         items: detailedItems,
         totals: totalsBlock,
+        ...finalizeExtras,
       });
 
       patchJobPhase(cfg, merchantId, jobId, 'WAITING_RESULT', { fiscalDocumentId: documentId });
@@ -377,7 +354,7 @@ async function runPosPaymentJobFromWs(data) {
       );
       const fin = await finRes.json().catch(() => null);
       if (!fin || fin.status !== 'SUCCESS') {
-        if (isLikelyLostPosResponseError(fin && fin.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId))) {
+        if (isLikelyLostPosResponseError(fin && fin.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType))) {
           appendServiceLog(
             `[backend-ws] POS_PAYMENT_JOB recovered via lastDocuments (finalize) jobId=${jobId}`,
           );
@@ -385,7 +362,7 @@ async function runPosPaymentJobFromWs(data) {
             cfg,
             merchantId,
             jobId,
-            buildJobSuccessPayload(itemsTotal, eftMeta, documentId),
+            buildJobSuccessPayload(itemsTotal, eftMeta, documentId, extractFiscalDocMetaFromHuginResponse(fin)),
           );
           return;
         }
@@ -413,11 +390,12 @@ async function runPosPaymentJobFromWs(data) {
         return;
       }
 
+      const fiscalDocMeta = extractFiscalDocMetaFromHuginResponse(fin);
       await postJobCompleteWithRetry(
         cfg,
         merchantId,
         jobId,
-        buildJobSuccessPayload(itemsTotal, eftMeta, documentId),
+        buildJobSuccessPayload(itemsTotal, eftMeta, documentId, fiscalDocMeta),
       );
       appendServiceLog(
         `[backend-ws] POS_PAYMENT_JOB ok jobId=${jobId} card itemsTotal=${itemsTotal} bankAmount=${bankAmount}` +
@@ -447,6 +425,7 @@ async function runPosPaymentJobFromWs(data) {
               };
             })
           : undefined,
+      ...finalizeExtras,
     });
 
     const finRes = await undiciFetch(
@@ -459,7 +438,7 @@ async function runPosPaymentJobFromWs(data) {
     );
     const fin = await finRes.json().catch(() => null);
     if (!fin || fin.status !== 'SUCCESS') {
-      if (isLikelyLostPosResponseError(fin && fin.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId))) {
+      if (isLikelyLostPosResponseError(fin && fin.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType))) {
         appendServiceLog(
           `[backend-ws] POS_PAYMENT_JOB recovered via lastDocuments (cash finalize) jobId=${jobId}`,
         );
@@ -467,18 +446,19 @@ async function runPosPaymentJobFromWs(data) {
           cfg,
           merchantId,
           jobId,
-          buildJobSuccessPayload(itemsTotal, null, documentId),
+          buildJobSuccessPayload(itemsTotal, null, documentId, extractFiscalDocMetaFromHuginResponse(fin)),
         );
         return;
       }
       throw new Error(formatHuginErr(fin && fin.error) || 'POS finalize failed');
     }
 
+    const cashFiscalMeta = extractFiscalDocMetaFromHuginResponse(fin);
     await postJobCompleteWithRetry(
       cfg,
       merchantId,
       jobId,
-      buildJobSuccessPayload(itemsTotal, null, documentId),
+      buildJobSuccessPayload(itemsTotal, null, documentId, cashFiscalMeta),
     );
     appendServiceLog(`[backend-ws] POS_PAYMENT_JOB ok jobId=${jobId} cash`);
   } catch (e) {
@@ -489,7 +469,7 @@ async function runPosPaymentJobFromWs(data) {
   }
 }
 
-function buildFinalizeBody({ amountTry, paymentType, items, totals }) {
+function buildFinalizeBody({ amountTry, paymentType, items, totals, saleType, customer, invoiceId }) {
   const totalAmount = toFixed2(amountTry);
   const hasDetailedItems = Array.isArray(items) && items.length > 0;
   const mappedItems = hasDetailedItems
@@ -522,11 +502,20 @@ function buildFinalizeBody({ amountTry, paymentType, items, totals }) {
         },
       ];
 
+  const resolvedSaleType = resolveSaleType(saleType);
+  const sanitizedCustomer = resolvedSaleType !== 'RECEIPT' ? sanitizeCustomer(customer) : null;
+
   const body = {
-    saleType: 'RECEIPT',
+    saleType: resolvedSaleType,
     items: mappedItems,
     payments: [{ type: paymentType, amount: totalAmount }],
   };
+  if (resolvedSaleType !== 'RECEIPT' && sanitizedCustomer) {
+    body.customer = sanitizedCustomer;
+  }
+  if (invoiceId != null && String(invoiceId).trim()) {
+    body.invoiceId = String(invoiceId).trim();
+  }
   if (!hasDetailedItems) {
     body.totals = {
       documentTotal: totalAmount,

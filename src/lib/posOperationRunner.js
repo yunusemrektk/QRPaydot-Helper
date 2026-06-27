@@ -9,6 +9,7 @@ const { buildFinalizeBody } = require('./posPaymentJobRunner');
 const { classifyHuginStatusJson, isLikelyLostPosResponseError } = require('./huginReachability');
 const { appendServiceLog } = require('./logger');
 const { parseEftPaymentMeta } = require('./parseEftPaymentMeta');
+const { findSuccessfulFiscalDocumentInLastDocuments } = require('./fiscalFinalize');
 
 function padSoftwareId10(raw) {
   const s = String(raw || '').trim();
@@ -52,52 +53,7 @@ function eftMetaPatch(meta) {
   };
 }
 
-function normDocId(raw) {
-  return String(raw ?? '')
-    .trim()
-    .toLowerCase();
-}
-
-function getLastDocumentsList(statusData) {
-  let cur = statusData;
-  for (let depth = 0; depth < 4 && cur && typeof cur === 'object' && !Array.isArray(cur); depth++) {
-    const ld = cur.lastDocuments ?? cur.LastDocuments;
-    if (Array.isArray(ld)) return ld;
-    const inner = cur.data;
-    if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
-      cur = inner;
-      continue;
-    }
-    break;
-  }
-  return [];
-}
-
-function findSuccessfulReceiptInLastDocuments(statusData, documentId) {
-  const want = normDocId(documentId);
-  if (!want) return false;
-  for (const entry of getLastDocumentsList(statusData)) {
-    if (!entry || typeof entry !== 'object') continue;
-    const id = normDocId(entry.documentId ?? entry.DocumentId);
-    if (id !== want) continue;
-    const st = String(entry.documentStatus ?? entry.DocumentStatus ?? '')
-      .trim()
-      .toUpperCase();
-    if (st !== 'SUCCESS') continue;
-    const docCat = String(entry.docCategory ?? entry.DocCategory ?? '')
-      .trim()
-      .toUpperCase();
-    const saleType = String(entry.saleType ?? entry.SaleType ?? '')
-      .trim()
-      .toUpperCase();
-    if (docCat && docCat !== 'SALE') continue;
-    if (saleType && saleType !== 'RECEIPT') continue;
-    return true;
-  }
-  return false;
-}
-
-async function pollDocumentSuccessOnDevice(localBase, qBase, documentId) {
+async function pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType) {
   const attempts = 3;
   const delayMs = 650;
   for (let i = 0; i < attempts; i++) {
@@ -107,7 +63,7 @@ async function pollDocumentSuccessOnDevice(localBase, qBase, documentId) {
     const cls = classifyHuginStatusJson(stJson);
     if (cls.kind === 'reachable_issue') return false;
     if (cls.kind === 'unreachable') continue;
-    if (findSuccessfulReceiptInLastDocuments(cls.data, documentId)) return true;
+    if (findSuccessfulFiscalDocumentInLastDocuments(cls.data, documentId, expectedSaleType)) return true;
   }
   return false;
 }
@@ -168,6 +124,15 @@ async function runPosOperation(operationId) {
   const huginLines = Array.isArray(op.huginLines) ? op.huginLines : null;
   const merchantId = String(op.merchantId || '').trim();
   const localBase = `http://127.0.0.1:${PORT}`;
+  const { resolveSaleType, sanitizeCustomer } = require('./fiscalFinalize');
+  const saleType = resolveSaleType(op.saleType);
+  const customer = sanitizeCustomer(op.customer);
+  const invoiceId = op.invoiceId != null ? String(op.invoiceId).trim() : '';
+  const expectedSaleType = saleType !== 'RECEIPT' ? saleType : undefined;
+  const finalizeExtras =
+    saleType !== 'RECEIPT' && customer
+      ? { saleType, customer, ...(invoiceId ? { invoiceId } : {}) }
+      : {};
 
   const qBase = new URLSearchParams({
     posDeviceId,
@@ -255,7 +220,7 @@ async function runPosOperation(operationId) {
       );
       const paid = await paidRes.json().catch(() => null);
       if (!paid || paid.status !== 'SUCCESS') {
-        if (isLikelyLostPosResponseError(paid && paid.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId))) {
+        if (isLikelyLostPosResponseError(paid && paid.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType))) {
           updateOperation(operationId, {
             status: 'SUCCEEDED',
             phase: 'done',
@@ -306,6 +271,7 @@ async function runPosOperation(operationId) {
         paymentType: 'EFT_POS',
         items: detailedItems,
         totals: totalsBlock,
+        ...finalizeExtras,
       });
 
       const finRes = await undiciFetch(
@@ -318,7 +284,7 @@ async function runPosOperation(operationId) {
       );
       const fin = await finRes.json().catch(() => null);
       if (!fin || fin.status !== 'SUCCESS') {
-        if (isLikelyLostPosResponseError(fin && fin.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId))) {
+        if (isLikelyLostPosResponseError(fin && fin.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType))) {
           updateOperation(operationId, {
             status: 'SUCCEEDED',
             phase: 'done',
@@ -365,6 +331,7 @@ async function runPosOperation(operationId) {
               };
             })
           : undefined,
+      ...finalizeExtras,
     });
 
     const finRes = await undiciFetch(
@@ -377,7 +344,7 @@ async function runPosOperation(operationId) {
     );
     const fin = await finRes.json().catch(() => null);
     if (!fin || fin.status !== 'SUCCESS') {
-      if (isLikelyLostPosResponseError(fin && fin.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId))) {
+      if (isLikelyLostPosResponseError(fin && fin.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType))) {
         updateOperation(operationId, {
           status: 'SUCCEEDED',
           phase: 'done',
