@@ -98,7 +98,7 @@ export default function UpdatePage() {
       </div>
 
       {/* Current version */}
-      <div className="metrics" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      <div className="metrics metrics-2">
         <div className="metric" data-tone="accent">
           <div className="metric-label">Mevcut sürüm</div>
           <div className="metric-value">v{currentVersion}</div>
@@ -189,21 +189,20 @@ export default function UpdatePage() {
       )}
 
       {/* Actions */}
-      <div className="panel" style={{ marginTop: "1rem" }}>
+      <div className="panel panel-mt">
         <h3>Manuel kontrol</h3>
         <p>
           Uygulama açıldığında ve belirli aralıklarla otomatik olarak güncelleme kontrolü yapar.
           Hemen kontrol etmek isterseniz aşağıdaki butonu kullanın.
         </p>
-        <div style={{ display: "flex", gap: ".6rem", marginTop: ".85rem", flexWrap: "wrap", alignItems: "center" }}>
+        <div className="row-actions">
           <button className="btn" disabled={checking} onClick={handleCheck}>
             {checking ? <Loader2 size={14} className="spin-icon" /> : <RefreshCw size={14} />}
             Güncelleme kontrol et
           </button>
           {status === "downloaded" && (
             <button
-              className="btn"
-              style={{ borderColor: "var(--success-border)", color: "var(--success)" }}
+              className="btn btn-success-outline"
               disabled={installing}
               onClick={handleInstall}
             >
@@ -211,9 +210,7 @@ export default function UpdatePage() {
               Yeniden başlat ve yükle
             </button>
           )}
-          {lastCheck && (
-            <span style={{ fontSize: ".75rem", color: "var(--text-dim)" }}>{lastCheck}</span>
-          )}
+          {lastCheck ? <span className="hint-inline">{lastCheck}</span> : null}
         </div>
       </div>
 

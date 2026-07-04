@@ -343,7 +343,8 @@ async function runPosPaymentJobFromWs(data) {
         ...finalizeExtras,
       });
 
-      patchJobPhase(cfg, merchantId, jobId, 'WAITING_RESULT', { fiscalDocumentId: documentId });
+      // FINALIZING: dash poll hızlı kalsın (WAITING_RESULT kart backoff 0.6–2.2s gecikme yaratıyordu).
+      patchJobPhase(cfg, merchantId, jobId, 'FINALIZING', { fiscalDocumentId: documentId });
       const finRes = await undiciFetch(
         `${localBase}/v1/pos/documents/${encodeURIComponent(documentId)}?${qBase.toString()}`,
         {
@@ -405,8 +406,8 @@ async function runPosPaymentJobFromWs(data) {
       return;
     }
 
-    // cash
-    patchJobPhase(cfg, merchantId, jobId, 'WAITING_RESULT', { fiscalDocumentId: documentId });
+    // cash — fiş basılırken FINALIZING (dash hızlı poll)
+    patchJobPhase(cfg, merchantId, jobId, 'FINALIZING', { fiscalDocumentId: documentId });
     const finBody = buildFinalizeBody({
       amountTry: itemsTotal,
       paymentType: 'CASH',

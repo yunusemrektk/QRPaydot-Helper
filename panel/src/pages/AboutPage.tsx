@@ -16,12 +16,12 @@ export default function AboutPage() {
         <div className="panel">
           <h3>QRPaydot Helper nedir?</h3>
           <p>
-            <strong style={{ color: "var(--text)" }}>QRPaydot Helper</strong>, işletmenize ait fiş
+            <strong className="text-strong">QRPaydot Helper</strong>, işletmenize ait fiş
             yazıcıları, çevrimdışı işlemler ve diğer yerel ihtiyaçlar için tasarlanmış masaüstü
             yardımcı uygulamadır.
           </p>
           <p>
-            Bulutta değil, <strong style={{ color: "var(--text)" }}>yalnızca bu bilgisayarda</strong>{" "}
+            Bulutta değil, <strong className="text-strong">yalnızca bu bilgisayarda</strong>{" "}
             çalışır. Tarayıcınız ağdaki yazıcıya doğrudan bağlanamadığından, fiş iletimi gibi işlemler
             bu süreç üzerinden gerçekleştirilir.
           </p>

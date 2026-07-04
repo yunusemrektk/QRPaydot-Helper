@@ -1,6 +1,6 @@
 {
   "name": "qrpaydot-helper",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "private": true,
   "description": "QRPaydot Helper — local HTTP → RAW TCP (JetDirect) bridge for thermal printers. Merchant-Dash EXTERNAL mode.",
   "repository": {
@@ -15,7 +15,7 @@
     "start": "node src/index.js",
     "dev": "node src/index.js",
     "desktop": "node scripts/write-embed-backend-api.cjs && electron .",
-    "desktop:dev": "node scripts/write-embed-backend-api.cjs && electron .",
+    "desktop:dev": "node scripts/write-embed-backend-api.cjs && npm run panel:build && electron .",
     "release:patch": "npm version patch && npm run publish:win",
     "release:minor": "npm version minor && npm run publish:win",
     "panel:install": "npm install --prefix panel",

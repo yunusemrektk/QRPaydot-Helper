@@ -15,7 +15,7 @@ export default function SupportPage() {
           bize ulaşabilirsiniz.
         </p>
 
-        <div style={{ marginTop: "0.85rem" }}>
+        <div className="contact-stack">
           <a href="mailto:info@qrpaydot.com" className="contact-card">
             <div className="cc-icon">
               <Mail width={18} height={18} strokeWidth={2} />
@@ -60,7 +60,7 @@ export default function SupportPage() {
           İleride bu bölümden QRPaydot teknik ekibinin, izniniz dahilinde bilgisayarınıza uzaktan
           bağlantı kurarak sorununuzu doğrudan çözmesi planlanmaktadır.
         </p>
-        <table className="kv-table" style={{ marginTop: "0.65rem" }}>
+        <table className="kv-table mt-sm">
           <tbody>
             <tr>
               <td>Durum</td>

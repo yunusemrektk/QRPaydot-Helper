@@ -32,7 +32,7 @@ export default function OfflinePage() {
           Bağlantı kesintisi sırasında biriken veriler, internet döndüğünde bulut sunucusuyla otomatik
           olarak eşleştirilecek.
         </p>
-        <table className="kv-table" style={{ marginTop: "0.65rem" }}>
+        <table className="kv-table mt-sm">
           <tbody>
             <tr>
               <td>Durum</td>

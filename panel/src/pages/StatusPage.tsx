@@ -1,4 +1,15 @@
-import { Check, Clock, CreditCard, ExternalLink, Globe, Printer, Radio, X } from "lucide-react";
+import {
+  Activity,
+  Check,
+  Clock,
+  Copy,
+  CreditCard,
+  ExternalLink,
+  Globe,
+  Printer,
+  Radio,
+  X,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useHealth } from "../context/HealthContext";
@@ -24,6 +35,33 @@ function elapsedStr(startTs: number) {
   return hInDay === 0 ? `${d} gün` : `${d} gün ${hInDay} sa`;
 }
 
+/** Ham ağ hatalarını işletme diline çevirir; host bilgisini korur. */
+function friendlyBackendError(raw: string | undefined | null): string {
+  const err = String(raw || "").trim();
+  if (!err) return "Sunucuya ulaşılamıyor";
+
+  const host = err.match(/(\d{1,3}(?:\.\d{1,3}){3}:\d{2,5})/)?.[1];
+  const hostHint = host ? ` (${host})` : "";
+
+  if (/ECONNREFUSED/i.test(err)) {
+    return `Sunucu kapalı veya bu adreste dinlemiyor${hostHint}`;
+  }
+  if (/ENOTFOUND|EAI_AGAIN/i.test(err)) {
+    return `Sunucu adresi çözülemedi${hostHint}`;
+  }
+  if (/ETIMEDOUT|ESOCKETTIMEDOUT|timeout/i.test(err)) {
+    return `Bağlantı zaman aşımına uğradı${hostHint}`;
+  }
+  if (/EHOSTUNREACH|ENETUNREACH/i.test(err)) {
+    return `Ağ üzerinden sunucuya erişilemiyor${hostHint}`;
+  }
+  if (/unauthorized|401|403|auth/i.test(err)) {
+    return "Kimlik doğrulanamadı — işletme panelinden Helper oturumunu yenileyin";
+  }
+  if (err.length > 96) return `${err.slice(0, 96)}…`;
+  return err;
+}
+
 type CkState = "ok" | "fail" | "dim";
 
 function ChecklistIcon({ state, icon: Icon }: { state: CkState; icon: LucideIcon }) {
@@ -44,6 +82,12 @@ function ChecklistIcon({ state, icon: Icon }: { state: CkState; icon: LucideIcon
       <Icon strokeWidth={2.5} />
     </span>
   );
+}
+
+function ckStatusClass(state: CkState) {
+  if (state === "ok") return "ck-status-ok";
+  if (state === "fail") return "ck-status-fail";
+  return "ck-status-soon";
 }
 
 export default function StatusPage() {
@@ -100,16 +144,19 @@ export default function StatusPage() {
     if (open && authed) {
       wsCk = "ok";
       wsBadge = "Bağlı";
-      wsSub =
-        "Sunucunun ittiği uzak fiş / POS işleri bu kanalda; yerel Hugin HTTP (telefon veya panelden) buna bağlı değil";
+      wsSub = "Uzak fiş ve POS işleri bu kanaldan gelir";
     } else if (!open) {
       wsCk = "fail";
       wsBadge = "Kapalı";
-      wsSub = err ? `Bağlantı yok — ${err}` : "WebSocket açılamadı veya sunucuya ulaşılamıyor";
+      wsSub = err
+        ? friendlyBackendError(err)
+        : "WebSocket açılamadı veya sunucuya ulaşılamıyor";
     } else {
       wsCk = "fail";
       wsBadge = "Kimlik";
-      wsSub = err ? `Oturum yok — ${err}` : "Kimlik doğrulanamadı";
+      wsSub = err
+        ? friendlyBackendError(err)
+        : "Kimlik doğrulanamadı — panelden oturumu yenileyin";
     }
   }
 
@@ -166,6 +213,9 @@ export default function StatusPage() {
     if (merchantDash) window.open(merchantDash, "_blank", "noopener,noreferrer");
   };
 
+  const serviceCk: CkState =
+    reachable === true ? "ok" : reachable === false ? "fail" : "dim";
+
   return (
     <div className="page visible">
       <div className="page-head">
@@ -218,12 +268,12 @@ export default function StatusPage() {
         </div>
         <div className="metric" data-tone="accent">
           <div className="metric-label">Uç nokta</div>
-          <div className="metric-value" style={{ fontSize: "0.78rem", fontWeight: 500 }}>
-            <code className="c" style={{ wordBreak: "break-all" }}>
+          <div className="metric-value metric-value-sm">
+            <code className="c">
               {typeof window !== "undefined" ? window.location.origin : ""}
             </code>
           </div>
-          <div style={{ marginTop: "0.5rem" }}>
+          <div className="metric-actions">
             <CopyUrlButton />
           </div>
         </div>
@@ -239,19 +289,12 @@ export default function StatusPage() {
           <h3>Sistem kontrol listesi</h3>
           <ul className="checklist">
             <li>
-              <ChecklistIcon
-                state={reachable ? "ok" : reachable === false ? "fail" : "dim"}
-                icon={Clock}
-              />
+              <ChecklistIcon state={serviceCk} icon={Clock} />
               <div className="ck-label">
                 <strong>Helper servisi</strong>
                 <span>Yerel HTTP süreci çalışma durumu</span>
               </div>
-              <span
-                className={`ck-status ${
-                  reachable ? "ck-status-ok" : reachable === false ? "ck-status-fail" : "ck-status-soon"
-                }`}
-              >
+              <span className={`ck-status ${ckStatusClass(serviceCk)}`}>
                 {reachable ? "Çalışıyor" : reachable === false ? "Kapalı" : "Kontrol ediliyor"}
               </span>
             </li>
@@ -261,17 +304,7 @@ export default function StatusPage() {
                 <strong>Yazıcı bağlantısı</strong>
                 <span>{printerSub}</span>
               </div>
-              <span
-                className={`ck-status ${
-                  printerCk === "ok"
-                    ? "ck-status-ok"
-                    : printerCk === "fail"
-                      ? "ck-status-fail"
-                      : "ck-status-soon"
-                }`}
-              >
-                {printerBadge}
-              </span>
+              <span className={`ck-status ${ckStatusClass(printerCk)}`}>{printerBadge}</span>
             </li>
             <li>
               <ChecklistIcon state={dashCk} icon={Globe} />
@@ -279,38 +312,15 @@ export default function StatusPage() {
                 <strong>İşletme paneli</strong>
                 <span>{dashSub}</span>
               </div>
-              <span
-                className={`ck-status ${
-                  dashCk === "ok"
-                    ? "ck-status-ok"
-                    : dashCk === "fail"
-                      ? "ck-status-fail"
-                      : "ck-status-soon"
-                }`}
-              >
-                {dashBadge}
-              </span>
+              <span className={`ck-status ${ckStatusClass(dashCk)}`}>{dashBadge}</span>
             </li>
             <li>
-              <ChecklistIcon
-                state={wsCk}
-                icon={Radio}
-              />
+              <ChecklistIcon state={wsCk} icon={Radio} />
               <div className="ck-label">
-                <strong>QRPaydot sunucu (WebSocket)</strong>
+                <strong>QRPaydot sunucu</strong>
                 <span>{wsSub}</span>
               </div>
-              <span
-                className={`ck-status ${
-                  wsCk === "ok"
-                    ? "ck-status-ok"
-                    : wsCk === "fail"
-                      ? "ck-status-fail"
-                      : "ck-status-soon"
-                }`}
-              >
-                {wsBadge}
-              </span>
+              <span className={`ck-status ${ckStatusClass(wsCk)}`}>{wsBadge}</span>
             </li>
             <li>
               <ChecklistIcon state={posCk} icon={CreditCard} />
@@ -318,33 +328,20 @@ export default function StatusPage() {
                 <strong>POS LAN hedefleri</strong>
                 <span>{posSub}</span>
               </div>
-              <span
-                className={`ck-status ${
-                  posCk === "ok"
-                    ? "ck-status-ok"
-                    : posCk === "fail"
-                      ? "ck-status-fail"
-                      : "ck-status-soon"
-                }`}
-              >
-                {posBadge}
-              </span>
+              <span className={`ck-status ${ckStatusClass(posCk)}`}>{posBadge}</span>
             </li>
           </ul>
           {data?.pos?.assignments && data.pos.assignments.length > 0 ? (
-            <div
-              className="pos-health-detail"
-              style={{ marginTop: "1rem", fontSize: "0.75rem", color: "var(--text-dim)" }}
-            >
-              <div style={{ fontWeight: 600, marginBottom: "0.35rem", color: "var(--text)" }}>
-                POS yönlendirme (bu PC)
-              </div>
-              <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
+            <div className="pos-routes">
+              <div className="pos-routes-title">POS yönlendirme (bu PC)</div>
+              <ul className="pos-routes-list">
                 {data.pos.assignments.map((a) => (
-                  <li key={a.posDeviceId} style={{ wordBreak: "break-all" }}>
+                  <li key={a.posDeviceId}>
                     <code className="c">{a.posDeviceId}</code>
+                    <span className="pos-arrow" aria-hidden>
+                      →
+                    </span>
                     <span>
-                      {" → "}
                       {a.scheme}://{a.host}:{a.port}
                     </span>
                   </li>
@@ -356,18 +353,24 @@ export default function StatusPage() {
 
         <div className="panel">
           <h3>Son olaylar</h3>
-          <div style={{ fontSize: "0.75rem", color: "var(--text-dim)", minHeight: 60 }}>
-            {events.length === 0 ? (
-              "Henüz bir olay kaydedilmedi."
-            ) : (
-              events.map((e, i) => (
+          {events.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-state-icon" aria-hidden>
+                <Activity strokeWidth={2} />
+              </div>
+              <strong>Henüz olay yok</strong>
+              <span>Servis ve bağlantı değişiklikleri burada görünecek.</span>
+            </div>
+          ) : (
+            <div className="events-list">
+              {events.map((e, i) => (
                 <div key={`${e.t}-${i}`} className="event-item">
                   <span className="event-time">{e.t}</span>
                   <span className="event-text">{e.m}</span>
                 </div>
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -393,19 +396,7 @@ function CopyUrlButton() {
         </>
       ) : (
         <>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width={12}
-            height={12}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2.5}
-            aria-hidden
-          >
-            <rect x="9" y="9" width="13" height="13" rx="2" />
-            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-          </svg>
+          <Copy width={12} height={12} strokeWidth={2.5} />
           Panoya kopyala
         </>
       )}

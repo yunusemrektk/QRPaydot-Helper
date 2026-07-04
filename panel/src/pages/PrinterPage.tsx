@@ -164,23 +164,15 @@ export default function PrinterPage() {
         <h3>Ağdaki yazıcılar</h3>
         <p>
           Helper, yerel ağınızdaki tüm fiş yazıcılarını otomatik olarak tarar. Aşağıdaki listeden
-          yazıcı seçiniz veya <strong style={{ color: "var(--text)" }}>Ağı tara</strong> butonuna
+          yazıcı seçiniz veya <strong className="text-strong">Ağı tara</strong> butonuna
           tıklayarak yeni tarama başlatın.
         </p>
 
-        <div
-          style={{
-            display: "flex",
-            gap: "0.5rem",
-            marginBottom: "0.65rem",
-            alignItems: "center",
-            marginTop: "0.85rem",
-          }}
-        >
+        <div className="row-actions">
           <select
+            className="field-grow"
             value={printerSelect}
             onChange={(e) => onSelectPrinter(e.target.value)}
-            style={{ flex: 1, marginBottom: 0 }}
             disabled={scanning}
           >
             {scanning ? (
@@ -202,8 +194,7 @@ export default function PrinterPage() {
           </select>
           <button
             type="button"
-            className={`btn${scanning ? " btn-scanning" : ""}`}
-            style={{ whiteSpace: "nowrap", padding: "0.55rem 0.9rem" }}
+            className={`btn btn-nowrap${scanning ? " btn-scanning" : ""}`}
             disabled={scanning}
             onClick={runScan}
           >
@@ -211,16 +202,7 @@ export default function PrinterPage() {
             Ağı tara
           </button>
         </div>
-        <div
-          style={{
-            fontSize: "0.72rem",
-            color: "var(--text-dim)",
-            marginBottom: "0.65rem",
-            minHeight: "1rem",
-          }}
-        >
-          {scanStatus}
-        </div>
+        {scanStatus ? <div className="scan-status">{scanStatus}</div> : null}
 
         <div className="grid-form">
           <div>
@@ -272,36 +254,25 @@ export default function PrinterPage() {
           onChange={(e) => setBody(e.target.value)}
         />
 
-        <div
-          style={{
-            display: "flex",
-            gap: "0.65rem",
-            marginTop: "0.4rem",
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
+        <button
+          type="button"
+          className="primary btn-primary-inline"
+          disabled={sending}
+          onClick={sendPrint}
         >
-          <button
-            type="button"
-            className="primary"
-            style={{ width: "auto", padding: "0.6rem 1.5rem" }}
-            disabled={sending}
-            onClick={sendPrint}
-          >
-            Test fişi gönder
-          </button>
-        </div>
+          Test fişi gönder
+        </button>
         <div className={logClass} role="log" aria-live="polite">
           {logText}
         </div>
       </div>
 
       {serviceUnlocked ? (
-        <div className="panel" style={{ borderStyle: "dashed", borderColor: "var(--border)" }}>
+        <div className="panel panel-dashed">
           <h3>Gelişmiş ayarlar</h3>
           <p>
             Bu bölüm teknik destek ekibi veya geliştiriciler içindir. Normal kullanımda değiştirmenize
-            gerek yoktur. Müşteri moduna dönmek için <strong>Ctrl+Shift+F12</strong> ile PIN girerek
+            gerek yoktur. Müşteri moduna dönmek için <strong className="text-strong">Ctrl+Shift+F12</strong> ile PIN girerek
             kilitleyin.
           </p>
 
@@ -335,7 +306,7 @@ export default function PrinterPage() {
           <label className="check-row">
             <input type="checkbox" checked={fsdot} onChange={(e) => setFsdot(e.target.checked)} />
             <span>
-              <strong style={{ color: "var(--text)" }}>FS .</strong> (1C 2E) gönder — GBK varsayılan
+              <strong className="text-strong">FS .</strong> (1C 2E) gönder — GBK varsayılan
               Xprinter&apos;larda gerekli.
             </span>
           </label>

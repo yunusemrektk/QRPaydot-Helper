@@ -225,13 +225,13 @@ export default function ServiceLogsPage() {
           <h2>Servis günlükleri</h2>
           <p>Günlük dosyaları — en fazla 7 gün saklanır; yalnızca servis modunda.</p>
         </div>
-        <div className="panel" style={{ maxWidth: 520 }}>
-          <p style={{ marginBottom: "1rem", color: "var(--text-secondary)" }}>
+        <div className="panel panel-narrow">
+          <p className="panel-lead">
             Bu bölüm teknik destek içindir. Görmek için servis modunu açın:{" "}
             <kbd className="kbd">Ctrl</kbd>+<kbd className="kbd">Shift</kbd>+<kbd className="kbd">F12</kbd>{" "}
             (macOS: <kbd className="kbd">⌘</kbd> ile aynı kısayol).
           </p>
-          <button type="button" className="btn primary" onClick={() => openServicePinModal("unlock")}>
+          <button type="button" className="primary" onClick={() => openServicePinModal("unlock")}>
             Servis modunu aç…
           </button>
         </div>
