@@ -11,7 +11,7 @@
  * - Writes a "just-updated" flag before restart so the panel can
  *   show a welcome modal on next launch.
  *
- * Only initialises inside a packaged Electron app.
+ * Only initialises in a packaged build that includes app-update.yml (GitHub Releases).
  */
 
 const path = require('path');
@@ -42,16 +42,24 @@ function getState() {
   return { ...state };
 }
 
+function canRunAutoUpdater() {
+  if (process.env.PRINT_BRIDGE_SKIP_AUTO_UPDATE === '1') return false;
+  try {
+    const { app } = require('electron');
+    if (app?.isPackaged !== true) return false;
+    // electron-builder yalnızca gerçek kurulumda app-update.yml üretir.
+    // desktop:dev markalı exe (QRPaydot Helper.exe) isPackaged=true dönebilir ama manifest yoktur.
+    const manifest = path.join(process.resourcesPath, 'app-update.yml');
+    return fs.existsSync(manifest);
+  } catch {
+    return false;
+  }
+}
+
 function init() {
   if (updater) return;
 
-  let isPackaged = false;
-  try {
-    isPackaged = require('electron').app?.isPackaged === true;
-  } catch {
-    return;
-  }
-  if (!isPackaged) {
+  if (!canRunAutoUpdater()) {
     console.log('[auto-updater] dev mode - skipping auto-update init');
     return;
   }
