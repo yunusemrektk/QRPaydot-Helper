@@ -6,6 +6,7 @@ dist/
 public/panel/
 panel/node_modules/
 src/generated/
+.cache/
 .cursor/
 
 # Test results

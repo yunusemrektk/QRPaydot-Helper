@@ -1,5 +1,7 @@
 'use strict';
 
+process.title = 'QRPaydot Helper';
+
 require('./src/loadEnv');
 
 const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, shell } = require('electron');

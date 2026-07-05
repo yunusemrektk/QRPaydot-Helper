@@ -14,8 +14,8 @@
     "predev": "node scripts/write-embed-backend-api.cjs",
     "start": "node src/index.js",
     "dev": "node src/index.js",
-    "desktop": "node scripts/write-embed-backend-api.cjs && electron .",
-    "desktop:dev": "node scripts/write-embed-backend-api.cjs && npm run panel:build && electron .",
+    "desktop": "node scripts/write-embed-backend-api.cjs && node scripts/run-electron-branded.cjs",
+    "desktop:dev": "node scripts/write-embed-backend-api.cjs && npm run panel:build && node scripts/run-electron-branded.cjs",
     "release:patch": "npm version patch && npm run publish:win",
     "release:minor": "npm version minor && npm run publish:win",
     "panel:install": "npm install --prefix panel",
@@ -30,6 +30,7 @@
   "build": {
     "appId": "com.qrpaydot.helper",
     "productName": "QRPaydot Helper",
+    "copyright": "Copyright © QRPaydot",
     "directories": {
       "output": "dist/electron"
     },
@@ -56,6 +57,7 @@
     "win": {
       "target": "nsis",
       "icon": "installer/QRPaydotHelper.ico",
+      "executableName": "QRPaydot Helper",
       "signAndEditExecutable": false
     },
     "nsis": {
