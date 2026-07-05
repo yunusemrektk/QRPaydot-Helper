@@ -2,7 +2,7 @@
 
 const WebSocket = require('ws');
 const { appendServiceLog } = require('./logger');
-const { getAssignment, getPrintDefaults } = require('./printerStore');
+const { getAssignment, getPrintDefaults, getAllPosAssignments } = require('./printerStore');
 const { buildEscPosPayload } = require('./escpos');
 const { sendToPrinter } = require('./printer');
 const { normalizePrintEncoding } = require('./encoding');
@@ -59,6 +59,11 @@ function sendAuth() {
   } else {
     payload.token = activeConfig.token;
   }
+  const posAssignments = getAllPosAssignments();
+  payload.posDeviceIds = Object.keys(posAssignments || {}).filter((id) => {
+    const ep = posAssignments[id];
+    return ep && String(ep.host || '').trim();
+  });
   ws.send(JSON.stringify(payload));
 }
 

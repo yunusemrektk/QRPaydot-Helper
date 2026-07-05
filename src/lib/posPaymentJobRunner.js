@@ -146,6 +146,19 @@ async function runPosPaymentJobFromWs(data) {
   const ep = getPosAssignment(posDeviceId) || getPosAssignment(posDeviceId.toLowerCase());
   if (!ep || !ep.host) {
     appendServiceLog(`[backend-ws] POS_PAYMENT_JOB no LAN assignment posDeviceId=${posDeviceId}`);
+    const cfgEarly = getBackendConnection();
+    const merchantIdEarly = String(data.merchantId || cfgEarly?.merchantId || '').trim();
+    if (
+      cfgEarly &&
+      merchantIdEarly &&
+      cfgEarly.apiBaseUrl &&
+      hasBackendCallbackAuth(cfgEarly)
+    ) {
+      await postJobCompleteWithRetry(cfgEarly, merchantIdEarly, jobId, {
+        status: 'FAILED',
+        errorMessage: 'POS cihazı bu kasada LAN ataması yok (NO_LAN_ASSIGNMENT)',
+      });
+    }
     return;
   }
 
