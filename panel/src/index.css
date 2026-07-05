@@ -771,6 +771,49 @@
 .log-msg-cred{color:#f2786c}
 .log-msg-err{color:#f87171;font-weight:500}
 .log-msg-warn{color:#fbbf24}
+.log-level-strip{display:flex;flex-wrap:wrap;gap:.4rem}
+.log-level-pill{
+  font-size:.6875rem;padding:.32rem .65rem;border-radius:999px;
+  border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);
+  cursor:pointer;transition:background .15s,border-color .15s,color .15s;
+}
+.log-level-pill:hover{border-color:var(--border-strong);color:var(--text-secondary)}
+.log-level-pill.active{background:var(--accent-dim);border-color:var(--accent);color:var(--text)}
+.log-path-row{
+  display:flex;flex-wrap:wrap;align-items:center;gap:.55rem;
+  padding:.55rem .65rem;border-radius:var(--radius-sm);
+  background:var(--shell);border:1px solid var(--border-subtle);
+}
+.log-path-code{
+  flex:1;min-width:0;font-family:var(--mono);font-size:.625rem;
+  color:var(--text-dim);word-break:break-all;line-height:1.45;
+}
+.log-path-actions{display:flex;flex-wrap:wrap;gap:.35rem;flex-shrink:0}
+.log-paths-toggle-wrap{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
+.log-paths-toggle{
+  font-size:.6875rem;color:var(--accent);background:none;border:none;padding:0;
+  cursor:pointer;text-decoration:underline;text-underline-offset:2px;
+}
+.log-copy-hint{font-size:.6875rem;color:var(--success)}
+.log-paths-list{
+  list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.55rem;
+}
+.log-paths-item{
+  padding:.65rem .75rem;border-radius:var(--radius-sm);
+  border:1px solid var(--border-subtle);background:var(--shell);
+}
+.log-paths-item-head{display:flex;align-items:center;gap:.45rem;margin-bottom:.25rem}
+.log-paths-item-label{font-size:.75rem;font-weight:600;color:var(--text-secondary)}
+.log-paths-missing{
+  font-size:.6rem;padding:.12rem .35rem;border-radius:4px;
+  background:var(--warning-bg);border:1px solid var(--warning-border);color:var(--warning);
+}
+.log-paths-item-path{
+  display:block;font-family:var(--mono);font-size:.625rem;color:var(--text-dim);
+  word-break:break-all;line-height:1.45;margin-bottom:.45rem;
+}
+.btn-sm{padding:.35rem .55rem!important;font-size:.6875rem!important;gap:.3rem!important}
+.log-tr-tone .log-td-msg{font-weight:500}
 
 #root {
   min-height: 100vh;

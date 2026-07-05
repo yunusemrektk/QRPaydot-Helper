@@ -1,7 +1,8 @@
 'use strict';
 
 const { Router } = require('express');
-const { readServiceLogTail, listServiceLogsIndex } = require('../lib/logger');
+const { readServiceLogTail, listServiceLogsIndex, LOG_DIR, LOGS_SUBDIR } = require('../lib/logger');
+const { listHelperDataPaths, resolveOpenTarget, revealInExplorer } = require('../lib/helperPaths');
 const { requireServicePin } = require('../middleware/servicePin');
 
 const router = Router();
@@ -13,6 +14,8 @@ router.get('/v1/service/logs/days', requireServicePin, (_req, res) => {
     retentionDays: idx.retentionDays,
     dates: idx.dates.slice().reverse(),
     files: idx.files,
+    dataDir: LOG_DIR,
+    logsDir: LOGS_SUBDIR,
   });
 });
 
@@ -28,7 +31,31 @@ router.get('/v1/service/logs', requireServicePin, (req, res) => {
     fileExists: result.fileExists,
     lineCount: result.lines.length,
     date: result.date,
+    pathUsed: result.pathUsed || null,
   });
+});
+
+router.get('/v1/service/paths', requireServicePin, (req, res) => {
+  const date = String(req.query.date || '').trim();
+  res.json({
+    ok: true,
+    dataDir: LOG_DIR,
+    logsDir: LOGS_SUBDIR,
+    paths: listHelperDataPaths(date || undefined),
+  });
+});
+
+router.post('/v1/service/open-path', requireServicePin, async (req, res) => {
+  const target = resolveOpenTarget(req.body || {});
+  if (!target) {
+    return res.status(400).json({ ok: false, error: 'invalid_target' });
+  }
+  const selectFile = Boolean(req.body?.selectFile);
+  const result = await revealInExplorer(target, { selectFile });
+  if (!result.ok) {
+    return res.status(500).json(result);
+  }
+  return res.json(result);
 });
 
 module.exports = router;

@@ -1,4 +1,4 @@
-import { Calendar, Copy, Pause, Play, RefreshCw, ScrollText, Search } from "lucide-react";
+import { Calendar, Copy, FolderOpen, Pause, Play, RefreshCw, ScrollText, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getServicePin } from "../config/serviceMode";
 import { useServiceMode } from "../context/ServiceModeContext";
@@ -23,6 +23,7 @@ type LogsPayload = {
   fileExists?: boolean;
   lineCount?: number;
   date?: string;
+  pathUsed?: string | null;
   error?: string;
 };
 
@@ -31,7 +32,20 @@ type LogDaysPayload = {
   dates?: string[];
   files?: Record<string, { path?: string; size?: number; legacy?: boolean } | null>;
   retentionDays?: number;
+  dataDir?: string;
+  logsDir?: string;
 };
+
+type HelperPathItem = {
+  id: string;
+  label: string;
+  path: string;
+  exists: boolean;
+  size?: number | null;
+  category: string;
+};
+
+type LogLevelFilter = "all" | "errors" | "warnings";
 
 const PIN_HEADER = "X-QRPaydot-Service-Pin";
 
@@ -62,6 +76,33 @@ function msgToneClass(msg: string): string {
   return "";
 }
 
+function lineMatchesLevelFilter(line: string, level: LogLevelFilter): boolean {
+  if (level === "all") return true;
+  const p = parseLogLine(line);
+  const msg = p?.msg ?? line;
+  const tone = msgToneClass(msg);
+  if (level === "errors") return tone === "log-msg-err";
+  if (level === "warnings") return tone === "log-msg-warn" || tone === "log-msg-err";
+  return true;
+}
+
+async function serviceFetch(
+  url: string,
+  init?: RequestInit & { jsonBody?: Record<string, unknown> },
+): Promise<Response> {
+  const pin = getServicePin();
+  const headers: Record<string, string> = {
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  if (pin) headers[PIN_HEADER] = pin;
+  const { jsonBody, ...rest } = init || {};
+  return fetch(url, {
+    ...rest,
+    headers,
+    body: jsonBody ? JSON.stringify(jsonBody) : rest.body,
+  });
+}
+
 export default function ServiceLogsPage() {
   const { serviceUnlocked, openServicePinModal } = useServiceMode();
   const [lines, setLines] = useState<string[]>([]);
@@ -74,6 +115,12 @@ export default function ServiceLogsPage() {
   const [selectedDate, setSelectedDate] = useState(() => localYmd());
   const [dayIndex, setDayIndex] = useState<LogDaysPayload | null>(null);
   const [filterQ, setFilterQ] = useState("");
+  const [levelFilter, setLevelFilter] = useState<LogLevelFilter>("all");
+  const [pathUsed, setPathUsed] = useState<string | null>(null);
+  const [helperPaths, setHelperPaths] = useState<HelperPathItem[]>([]);
+  const [pathsOpen, setPathsOpen] = useState(false);
+  const [openPathBusy, setOpenPathBusy] = useState(false);
+  const [copyHint, setCopyHint] = useState("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickBottom = useRef(true);
   const tabVisibleRef = useRef(typeof document !== "undefined" && document.visibilityState === "visible");
@@ -84,11 +131,7 @@ export default function ServiceLogsPage() {
   const fetchDayIndex = useCallback(async () => {
     if (!serviceUnlocked) return;
     try {
-      const pin = getServicePin();
-      const r = await fetch("/v1/service/logs/days", {
-        cache: "no-store",
-        headers: pin ? { [PIN_HEADER]: pin } : {},
-      });
+      const r = await serviceFetch("/v1/service/logs/days", { cache: "no-store" });
       const j = (await r.json()) as LogDaysPayload;
       if (r.ok && j.ok && Array.isArray(j.dates)) {
         setDayIndex(j);
@@ -99,6 +142,20 @@ export default function ServiceLogsPage() {
     }
   }, [serviceUnlocked]);
 
+  const fetchHelperPaths = useCallback(async () => {
+    if (!serviceUnlocked) return;
+    try {
+      const qs = new URLSearchParams({ date: selectedDate });
+      const r = await serviceFetch(`/v1/service/paths?${qs}`, { cache: "no-store" });
+      const j = (await r.json()) as { ok?: boolean; paths?: HelperPathItem[] };
+      if (r.ok && j.ok && Array.isArray(j.paths)) {
+        setHelperPaths(j.paths);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [serviceUnlocked, selectedDate]);
+
   const fetchLogs = useCallback(
     async (opts?: { silent?: boolean }) => {
       if (!serviceUnlocked) return;
@@ -106,22 +163,19 @@ export default function ServiceLogsPage() {
       if (!silent) setLoading(true);
       setError(null);
       try {
-        const pin = getServicePin();
         const qs = new URLSearchParams({
           lines: "1500",
           maxBytes: "350000",
           date: selectedDate,
         });
-        const r = await fetch(`/v1/service/logs?${qs}`, {
-          cache: "no-store",
-          headers: pin ? { [PIN_HEADER]: pin } : {},
-        });
+        const r = await serviceFetch(`/v1/service/logs?${qs}`, { cache: "no-store" });
         const j = (await r.json()) as LogsPayload;
         if (r.status === 401) {
           setError(
             "Servis PIN doğrulanamadı. Panel ile aynı VITE_SERVICE_PIN / PRINT_BRIDGE_SERVICE_PIN değerini kullanın.",
           );
           setLines([]);
+          setPathUsed(null);
           return;
         }
         if (!r.ok || !j.ok) {
@@ -131,6 +185,7 @@ export default function ServiceLogsPage() {
         setLines(Array.isArray(j.lines) ? j.lines : []);
         setTruncated(Boolean(j.truncated));
         setFileExists(j.fileExists !== false);
+        setPathUsed(typeof j.pathUsed === "string" ? j.pathUsed : null);
         setLastFetch(
           new Date().toLocaleTimeString("tr-TR", {
             hour: "2-digit",
@@ -151,6 +206,11 @@ export default function ServiceLogsPage() {
     if (!serviceUnlocked) return;
     void fetchDayIndex();
   }, [serviceUnlocked, fetchDayIndex]);
+
+  useEffect(() => {
+    if (!serviceUnlocked) return;
+    void fetchHelperPaths();
+  }, [serviceUnlocked, selectedDate, fetchHelperPaths]);
 
   useEffect(() => {
     if (!serviceUnlocked) return;
@@ -186,9 +246,12 @@ export default function ServiceLogsPage() {
 
   const filteredLines = useMemo(() => {
     const q = filterQ.trim().toLowerCase();
-    if (!q) return lines;
-    return lines.filter((ln) => ln.toLowerCase().includes(q));
-  }, [lines, filterQ]);
+    return lines.filter((ln) => {
+      if (!lineMatchesLevelFilter(ln, levelFilter)) return false;
+      if (!q) return true;
+      return ln.toLowerCase().includes(q);
+    });
+  }, [lines, filterQ, levelFilter]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -212,11 +275,45 @@ export default function ServiceLogsPage() {
 
   const copyVisible = () => {
     void navigator.clipboard.writeText(filteredLines.join("\n")).then(() => {
-      /* toast optional */
+      setCopyHint("Panoya kopyalandı");
+      window.setTimeout(() => setCopyHint(""), 2000);
     });
   };
 
+  const copyPath = (p: string) => {
+    void navigator.clipboard.writeText(p).then(() => {
+      setCopyHint("Yol kopyalandı");
+      window.setTimeout(() => setCopyHint(""), 2000);
+    });
+  };
+
+  const openPath = async (id: string) => {
+    setOpenPathBusy(true);
+    setError(null);
+    try {
+      const r = await serviceFetch("/v1/service/open-path", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        jsonBody: { id, date: selectedDate },
+      });
+      const j = (await r.json()) as { ok?: boolean; error?: string };
+      if (!r.ok || !j.ok) {
+        setError(j.error || "Dosya yolu açılamadı");
+        return;
+      }
+      setCopyHint("Explorer'da açıldı");
+      window.setTimeout(() => setCopyHint(""), 2000);
+    } catch {
+      setError("Dosya yolu açılamadı");
+    } finally {
+      setOpenPathBusy(false);
+    }
+  };
+
   const datesForChips = dayIndex?.dates?.length ? dayIndex.dates : [todayYmd];
+  const retention = dayIndex?.retentionDays ?? 7;
+  const fileMeta = dayIndex?.files?.[selectedDate];
+  const displayPath = pathUsed || fileMeta?.path || dayIndex?.logsDir || null;
 
   if (!serviceUnlocked) {
     return (
@@ -239,8 +336,6 @@ export default function ServiceLogsPage() {
     );
   }
 
-  const retention = dayIndex?.retentionDays ?? 7;
-  const fileMeta = dayIndex?.files?.[selectedDate];
   const sizeStr =
     fileMeta && typeof fileMeta.size === "number"
       ? `${(fileMeta.size / 1024).toFixed(fileMeta.size >= 10240 ? 0 : 1)} KB`
@@ -312,6 +407,87 @@ export default function ServiceLogsPage() {
           />
         </div>
 
+        <div className="log-level-strip" role="group" aria-label="Satır filtresi">
+          {(
+            [
+              ["all", "Tümü"],
+              ["errors", "Hatalar"],
+              ["warnings", "Uyarı + hata"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={`log-level-pill ${levelFilter === id ? "active" : ""}`}
+              aria-pressed={levelFilter === id}
+              onClick={() => setLevelFilter(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {displayPath ? (
+          <div className="log-path-row">
+            <code className="log-path-code" title={displayPath}>
+              {displayPath}
+            </code>
+            <div className="log-path-actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={openPathBusy}
+                onClick={() => void openPath("logsDir")}
+                title="Günlük klasörünü aç"
+              >
+                <FolderOpen size={14} aria-hidden /> Klasör
+              </button>
+              <button type="button" className="btn btn-sm" onClick={() => copyPath(displayPath)} title="Yolu kopyala">
+                <Copy size={14} aria-hidden />
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="log-paths-toggle-wrap">
+          <button
+            type="button"
+            className="log-paths-toggle"
+            aria-expanded={pathsOpen}
+            onClick={() => setPathsOpen((v) => !v)}
+          >
+            Helper dosya konumları ({helperPaths.length})
+          </button>
+          {copyHint ? <span className="log-copy-hint">{copyHint}</span> : null}
+        </div>
+
+        {pathsOpen ? (
+          <ul className="log-paths-list">
+            {helperPaths.map((item) => (
+              <li key={item.id} className="log-paths-item">
+                <div className="log-paths-item-head">
+                  <span className="log-paths-item-label">{item.label}</span>
+                  {!item.exists ? <span className="log-paths-missing">yok</span> : null}
+                </div>
+                <code className="log-paths-item-path">{item.path}</code>
+                <div className="log-path-actions">
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={openPathBusy}
+                    onClick={() => void openPath(item.id)}
+                  >
+                    <FolderOpen size={14} aria-hidden /> Aç
+                  </button>
+                  <button type="button" className="btn btn-sm" onClick={() => copyPath(item.path)}>
+                    <Copy size={14} aria-hidden />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
         <div className="log-unified-foot">
           <div className="log-meta-block log-unified-meta">
             <span className="log-meta">
@@ -320,7 +496,7 @@ export default function ServiceLogsPage() {
               ) : (
                 <>
                   <strong>{filteredLines.length}</strong>
-                  {filterQ.trim() ? (
+                  {filterQ.trim() || levelFilter !== "all" ? (
                     <>
                       {" "}
                       / {lines.length} satır (süzülü)
