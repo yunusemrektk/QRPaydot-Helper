@@ -14,3 +14,6 @@ coverage/
 .nyc_output/
 *.lcov
 test-results/
+
+# Pilot notları (yerel)
+docs/PILOT.md

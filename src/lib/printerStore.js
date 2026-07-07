@@ -166,10 +166,14 @@ function getPosDepartmentCacheEntry(posDeviceId) {
   if (!entry || !Array.isArray(entry.departments) || entry.departments.length === 0) return null;
   const departments = entry.departments
     .filter((d) => d && d.id != null && Number.isFinite(Number(d.id)))
-    .map((d) => ({
-      id: Number(d.id),
-      vatRate: d.vatRate != null && Number.isFinite(Number(d.vatRate)) ? Number(d.vatRate) : 0,
-    }));
+    .map((d) => {
+      const name = d.name != null ? String(d.name).trim().slice(0, 128) : '';
+      return {
+        id: Number(d.id),
+        ...(name ? { name } : {}),
+        vatRate: d.vatRate != null && Number.isFinite(Number(d.vatRate)) ? Number(d.vatRate) : 0,
+      };
+    });
   if (!departments.length) return null;
   return {
     savedAt: entry.savedAt != null ? String(entry.savedAt) : null,
@@ -182,10 +186,14 @@ function setPosDepartmentCache(posDeviceId, departments) {
   const store = loadStore();
   store.posDepartmentCache[String(posDeviceId)] = {
     savedAt: new Date().toISOString(),
-    departments: departments.map((d) => ({
-      id: Number(d.id),
-      vatRate: d.vatRate != null && Number.isFinite(Number(d.vatRate)) ? Number(d.vatRate) : 0,
-    })),
+    departments: departments.map((d) => {
+      const name = d.name != null ? String(d.name).trim().slice(0, 128) : '';
+      return {
+        id: Number(d.id),
+        ...(name ? { name } : {}),
+        vatRate: d.vatRate != null && Number.isFinite(Number(d.vatRate)) ? Number(d.vatRate) : 0,
+      };
+    }),
   };
   saveStore(store);
 }

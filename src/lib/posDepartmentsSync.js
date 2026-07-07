@@ -25,10 +25,14 @@ function normalizeDepartments(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((d) => d && d.id != null && Number.isFinite(Number(d.id)))
-    .map((d) => ({
-      id: Number(d.id),
-      vatRate: d.vatRate != null && Number.isFinite(Number(d.vatRate)) ? Number(d.vatRate) : 0,
-    }));
+    .map((d) => {
+      const name = d.name != null ? String(d.name).trim().slice(0, 128) : '';
+      return {
+        id: Number(d.id),
+        ...(name ? { name } : {}),
+        vatRate: d.vatRate != null && Number.isFinite(Number(d.vatRate)) ? Number(d.vatRate) : 0,
+      };
+    });
 }
 
 function departmentsSnapshotEqual(a, b) {
@@ -39,7 +43,13 @@ function departmentsSnapshotEqual(a, b) {
   const ls = sorted(left);
   const rs = sorted(right);
   for (let i = 0; i < ls.length; i++) {
-    if (ls[i].id !== rs[i].id || ls[i].vatRate !== rs[i].vatRate) return false;
+    if (
+      ls[i].id !== rs[i].id ||
+      ls[i].vatRate !== rs[i].vatRate ||
+      (ls[i].name || '') !== (rs[i].name || '')
+    ) {
+      return false;
+    }
   }
   return true;
 }
