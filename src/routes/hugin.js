@@ -3,6 +3,7 @@
 const { Router } = require('express');
 const { fetch: undiciFetch, Agent } = require('undici');
 const { getPosAssignment } = require('../lib/printerStore');
+const { resolveHuginHeadersForPosDevice } = require('../lib/posDeviceRecordCache');
 const { isPrivateOrLocalHost } = require('../config');
 const { appendServiceLog } = require('../lib/logger');
 const os = require('os');
@@ -160,7 +161,7 @@ async function huginFetchInner(posDeviceId, path, init, headersExtra) {
 
   const headers = {
     'Content-Type': 'application/json',
-    ...(headersExtra || {}),
+    ...(await resolveHuginHeadersForPosDevice(posDeviceId, headersExtra || {})),
   };
   if (mac) headers['X-HardwareId'] = mac;
 
