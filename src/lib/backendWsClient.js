@@ -204,6 +204,20 @@ function onMessage(raw) {
     });
     return;
   }
+  if (type === 'POS_HELPER_POS_ASSIGN' && msg.data) {
+    if (!authenticated) {
+      appendServiceLog('[backend-ws] POS_HELPER_POS_ASSIGN ignored (not authenticated)');
+      return;
+    }
+    const pid = msg.data.probeId != null ? String(msg.data.probeId).trim() : '';
+    appendServiceLog(`[backend-ws] POS_HELPER_POS_ASSIGN recv probeId=${pid}`);
+    console.log(`[qrpaydot-helper] POS_HELPER_POS_ASSIGN recv probeId=${pid}`);
+    const { handlePosHelperPosAssign } = require('./posAssignWs');
+    void handlePosHelperPosAssign(msg.data).catch((err) => {
+      appendServiceLog(`[backend-ws] POS_HELPER_POS_ASSIGN ${err.message || err}`);
+    });
+    return;
+  }
 }
 
 function connectNow() {
@@ -294,4 +308,5 @@ module.exports = {
   stopBackendWs,
   getBackendWsState,
   apiBaseUrlToWsUrl,
+  refreshBackendWsAuth: sendAuth,
 };
