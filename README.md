@@ -128,9 +128,7 @@ Yalnızca publish (versiyon zaten artırılmışsa):
 
 ```bash
 npm run publish:win
-```
-
-`release:*` komutlarından önce working tree temiz olmalıdır (`npm version` commit oluşturur). Publish başarısız olursa oluşan git tag'ini manuel silmeniz gerekebilir.
+```a oluşan git tag'ini manuel silmeniz gerekebilir.
 
 Bu tek komut sırasıyla:
 - Panel'i build eder
