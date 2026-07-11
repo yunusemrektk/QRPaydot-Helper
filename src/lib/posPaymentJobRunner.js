@@ -118,9 +118,9 @@ function buildJobSuccessPayload(recordedAmount, eftMeta, fiscalDocumentId, fisca
 }
 
 
-async function pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType) {
-  const attempts = 3;
-  const delayMs = 650;
+async function pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType, opts) {
+  const attempts = opts && Number(opts.attempts) > 0 ? Math.floor(Number(opts.attempts)) : 3;
+  const delayMs = opts && Number(opts.delayMs) > 0 ? Math.floor(Number(opts.delayMs)) : 650;
   for (let i = 0; i < attempts; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, delayMs));
     const stRes = await undiciFetch(`${localBase}/v1/pos/status?${qBase.toString()}`, { method: 'GET' });
@@ -132,6 +132,9 @@ async function pollDocumentSuccessOnDevice(localBase, qBase, documentId, expecte
   }
   return false;
 }
+
+/** Finalize PUT timeout sonrası — fiş hâlâ basılıyor olabilir; biraz daha uzun poll. */
+const FINALIZE_RECOVERY_POLL = { attempts: 8, delayMs: 800 };
 
 /**
  * @param {object} data — WS `POS_PAYMENT_JOB` gövdesi (serialNo, vkn, posDeviceId, …)
@@ -368,7 +371,16 @@ async function runPosPaymentJobFromWs(data) {
       );
       const fin = await finRes.json().catch(() => null);
       if (!fin || fin.status !== 'SUCCESS') {
-        if (isLikelyLostPosResponseError(fin && fin.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType))) {
+        if (
+          isLikelyLostPosResponseError(fin && fin.error) &&
+          (await pollDocumentSuccessOnDevice(
+            localBase,
+            qBase,
+            documentId,
+            expectedSaleType,
+            FINALIZE_RECOVERY_POLL,
+          ))
+        ) {
           appendServiceLog(
             `[backend-ws] POS_PAYMENT_JOB recovered via lastDocuments (finalize) jobId=${jobId}`,
           );
@@ -452,7 +464,16 @@ async function runPosPaymentJobFromWs(data) {
     );
     const fin = await finRes.json().catch(() => null);
     if (!fin || fin.status !== 'SUCCESS') {
-      if (isLikelyLostPosResponseError(fin && fin.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType))) {
+      if (
+        isLikelyLostPosResponseError(fin && fin.error) &&
+        (await pollDocumentSuccessOnDevice(
+          localBase,
+          qBase,
+          documentId,
+          expectedSaleType,
+          FINALIZE_RECOVERY_POLL,
+        ))
+      ) {
         appendServiceLog(
           `[backend-ws] POS_PAYMENT_JOB recovered via lastDocuments (cash finalize) jobId=${jobId}`,
         );

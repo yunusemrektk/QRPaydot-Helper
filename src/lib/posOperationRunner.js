@@ -53,9 +53,9 @@ function eftMetaPatch(meta) {
   };
 }
 
-async function pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType) {
-  const attempts = 3;
-  const delayMs = 650;
+async function pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType, opts) {
+  const attempts = opts && Number(opts.attempts) > 0 ? Math.floor(Number(opts.attempts)) : 3;
+  const delayMs = opts && Number(opts.delayMs) > 0 ? Math.floor(Number(opts.delayMs)) : 650;
   for (let i = 0; i < attempts; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, delayMs));
     const stRes = await undiciFetch(`${localBase}/v1/pos/status?${qBase.toString()}`, { method: 'GET' });
@@ -67,6 +67,8 @@ async function pollDocumentSuccessOnDevice(localBase, qBase, documentId, expecte
   }
   return false;
 }
+
+const FINALIZE_RECOVERY_POLL = { attempts: 8, delayMs: 800 };
 
 function classifyPaymentError(err) {
   const title = err && err.title ? String(err.title).trim().toLowerCase() : '';
@@ -284,7 +286,16 @@ async function runPosOperation(operationId) {
       );
       const fin = await finRes.json().catch(() => null);
       if (!fin || fin.status !== 'SUCCESS') {
-        if (isLikelyLostPosResponseError(fin && fin.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType))) {
+        if (
+          isLikelyLostPosResponseError(fin && fin.error) &&
+          (await pollDocumentSuccessOnDevice(
+            localBase,
+            qBase,
+            documentId,
+            expectedSaleType,
+            FINALIZE_RECOVERY_POLL,
+          ))
+        ) {
           updateOperation(operationId, {
             status: 'SUCCEEDED',
             phase: 'done',
@@ -344,7 +355,16 @@ async function runPosOperation(operationId) {
     );
     const fin = await finRes.json().catch(() => null);
     if (!fin || fin.status !== 'SUCCESS') {
-      if (isLikelyLostPosResponseError(fin && fin.error) && (await pollDocumentSuccessOnDevice(localBase, qBase, documentId, expectedSaleType))) {
+      if (
+        isLikelyLostPosResponseError(fin && fin.error) &&
+        (await pollDocumentSuccessOnDevice(
+          localBase,
+          qBase,
+          documentId,
+          expectedSaleType,
+          FINALIZE_RECOVERY_POLL,
+        ))
+      ) {
         updateOperation(operationId, {
           status: 'SUCCEEDED',
           phase: 'done',

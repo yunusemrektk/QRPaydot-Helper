@@ -39,7 +39,15 @@ function dbg(event, payload) {
 let huginInsecureDispatcher = null;
 function getHuginInsecureDispatcher() {
   if (!huginInsecureDispatcher) {
-    huginInsecureDispatcher = new Agent({ connect: { rejectUnauthorized: false } });
+    // Keep-alive reuse Hugin'de yarım kalan TLS soketinden sonra kuyruğu kilitliyor
+    // ("birkaç işlem sonra POS'a istek gitmiyor"). Tek bağlantı, pipeline yok, keep-alive kapalı.
+    huginInsecureDispatcher = new Agent({
+      connect: { rejectUnauthorized: false },
+      connections: 1,
+      pipelining: 0,
+      keepAliveTimeout: 1,
+      keepAliveMaxTimeout: 1,
+    });
   }
   return huginInsecureDispatcher;
 }
@@ -145,6 +153,35 @@ function summarizeHuginJson(json) {
 
 /** Hugin PC Link tek istek kabul eder — cihaz başına HTTP sırası. */
 const huginFetchTailByPosId = new Map();
+/** Aynı anda birden fazla GET /status kuyruğa girmesin (EFT beklerken probe spam). */
+const huginQueuedStatusByPosId = new Map();
+
+/** Operasyon tipine göre üst süre — kuyruk sonsuza kilitlenmesin. EFT bilerek uzun. */
+const HUGIN_TIMEOUT_STATUS_MS = 10_000;
+const HUGIN_TIMEOUT_EFT_MS = 150_000;
+const HUGIN_TIMEOUT_FINALIZE_MS = 120_000;
+const HUGIN_TIMEOUT_DEFAULT_MS = 60_000;
+
+function resolveHuginTimeoutMs(relPath, method, explicitMs) {
+  if (Number(explicitMs) > 0) return Math.floor(Number(explicitMs));
+  const p = String(relPath || '').replace(/^\/+/, '');
+  const m = String(method || 'GET').toUpperCase();
+  if (m === 'GET' && (p === 'status' || p.startsWith('status/'))) return HUGIN_TIMEOUT_STATUS_MS;
+  if (m === 'POST' && /\/payments\/EFT_POS$/i.test(p)) return HUGIN_TIMEOUT_EFT_MS;
+  if (m === 'PUT' && /^documents\/[^/]+$/i.test(p)) return HUGIN_TIMEOUT_FINALIZE_MS;
+  return HUGIN_TIMEOUT_DEFAULT_MS;
+}
+
+function isAbortTimeoutError(err) {
+  if (!err) return false;
+  if (err.name === 'AbortError' || err.code === 'ABORT_ERR') return true;
+  const msg = String(err.message || err).toLowerCase();
+  return msg.includes('aborted') || msg.includes('timeout') || msg.includes('headers timeout') || msg.includes('body timeout');
+}
+
+function isStatusGet(relPath, method) {
+  return String(method || 'GET').toUpperCase() === 'GET' && String(relPath || '').replace(/^\/+/, '') === 'status';
+}
 
 async function huginFetchInner(posDeviceId, path, init, headersExtra) {
   const ep = getPosAssignment(posDeviceId);
@@ -170,26 +207,30 @@ async function huginFetchInner(posDeviceId, path, init, headersExtra) {
 
   const method = String((init && init.method) || 'GET').toUpperCase();
   const relPath = String(path).replace(/^\/+/, '');
+  const { timeoutMs: explicitTimeout, body: bodyIn, ...restInit } = init || {};
+  const timeoutMs = resolveHuginTimeoutMs(relPath, method, explicitTimeout);
 
   dbg('request', {
     posDeviceId,
     to: url,
-    method: init.method,
+    method: init && init.method,
+    timeoutMs,
     headers: {
       'X-SoftwareId': headers['X-SoftwareId'],
       'X-SerialNo': headers['X-SerialNo'],
       'X-HardwareId': headers['X-HardwareId'],
       Authorization: headers.Authorization ? 'Bearer <redacted>' : undefined,
     },
-    body: init.body ?? undefined,
+    body: bodyIn ?? undefined,
   });
 
   const urlObj = new URL(url);
   const relaxTls = urlObj.protocol === 'https:' && shouldRelaxTlsForHugin(urlObj.hostname, ep.port);
   const fetchOpts = {
-    ...init,
+    ...restInit,
     headers,
-    body: init.body != null ? JSON.stringify(init.body) : undefined,
+    body: bodyIn != null ? JSON.stringify(bodyIn) : undefined,
+    signal: AbortSignal.timeout(timeoutMs),
     ...(relaxTls ? { dispatcher: getHuginInsecureDispatcher() } : {}),
   };
   try {
@@ -206,7 +247,46 @@ async function huginFetchInner(posDeviceId, path, init, headersExtra) {
     return { httpStatus: res.status, json };
   } catch (err) {
     const msg = err && err.message ? String(err.message).slice(0, 240) : String(err);
+    if (isAbortTimeoutError(err)) {
+      appendServiceLog(
+        `[hugin-proxy] ${method} ${relPath} pos=${posDeviceId} -> TIMEOUT ${timeoutMs}ms`,
+      );
+      dbg('response', {
+        posDeviceId,
+        from: url,
+        httpStatus: 504,
+        timeoutMs,
+        error: 'Request timed out',
+      });
+      // Ölü keep-alive soketi bir sonraki isteği de bozmasın.
+      try {
+        if (huginInsecureDispatcher) {
+          huginInsecureDispatcher.close();
+          huginInsecureDispatcher = null;
+        }
+      } catch {
+        huginInsecureDispatcher = null;
+      }
+      return {
+        httpStatus: 504,
+        json: {
+          status: 'ERROR',
+          error: {
+            title: 'Request timed out',
+            description: `POS did not respond within ${timeoutMs}ms`,
+          },
+        },
+      };
+    }
     appendServiceLog(`[hugin-proxy] ${method} ${relPath} pos=${posDeviceId} -> FETCH_ERR ${msg}`);
+    try {
+      if (huginInsecureDispatcher) {
+        huginInsecureDispatcher.close();
+        huginInsecureDispatcher = null;
+      }
+    } catch {
+      huginInsecureDispatcher = null;
+    }
     throw err;
   }
 }
@@ -215,16 +295,44 @@ async function huginFetch(posDeviceId, path, init, headersExtra) {
   const key = String(posDeviceId || '').trim();
   if (!key) return huginFetchInner(posDeviceId, path, init, headersExtra);
 
+  const method = String((init && init.method) || 'GET').toUpperCase();
+  const relPath = String(path).replace(/^\/+/, '');
+
+  // EFT/finalize sırasında arka arkaya status probe'ları kuyruğu şişirip
+  // belge sonlandırmayı geciktiriyordu — tek status çağrısına birleştir.
+  if (isStatusGet(relPath, method)) {
+    const existing = huginQueuedStatusByPosId.get(key);
+    if (existing) {
+      dbg('status-coalesced', { posDeviceId: key });
+      return existing;
+    }
+  }
+
+  const enqueuedAt = Date.now();
   const prev = huginFetchTailByPosId.get(key) ?? Promise.resolve();
   const next = prev
     .catch(() => undefined)
-    .then(() => huginFetchInner(key, path, init, headersExtra))
+    .then(() => {
+      const waitedMs = Date.now() - enqueuedAt;
+      if (waitedMs >= 500) {
+        appendServiceLog(
+          `[hugin-proxy] queue-wait ${waitedMs}ms ${method} ${relPath} pos=${key}`,
+        );
+      }
+      return huginFetchInner(key, path, init, headersExtra);
+    })
     .finally(() => {
       if (huginFetchTailByPosId.get(key) === next) {
         huginFetchTailByPosId.delete(key);
       }
+      if (isStatusGet(relPath, method) && huginQueuedStatusByPosId.get(key) === next) {
+        huginQueuedStatusByPosId.delete(key);
+      }
     });
   huginFetchTailByPosId.set(key, next);
+  if (isStatusGet(relPath, method)) {
+    huginQueuedStatusByPosId.set(key, next);
+  }
   return next;
 }
 
